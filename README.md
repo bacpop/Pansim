@@ -1,0 +1,2 @@
+# Pansim
+Pangenome simulator
