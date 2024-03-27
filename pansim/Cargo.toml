@@ -9,3 +9,4 @@ authors = ["Samuel T. Horsfield <shorsfield@ebi.ac.uk>"]
 [dependencies]
 rand = "0.8.5"
 statrs = "0.16"
+rayon = "1.5"
