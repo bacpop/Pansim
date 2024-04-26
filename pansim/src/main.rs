@@ -1,8 +1,6 @@
 extern crate rand;
 extern crate statrs;
 extern crate rayon;
-extern crate rand_core;
-extern crate rand_xoshiro;
 
 use rayon::prelude::*;
 
@@ -183,9 +181,9 @@ fn main() {
     use std::time::Instant;
     let now = Instant::now();
     
-    let n_threads = 1;
+    let n_threads = 4;
 
-    let pop_size = 100;
+    let pop_size = 1000;
     let core_size = 2000000;
     let pan_size = 6000;
     let n_gen = 100;
@@ -195,8 +193,8 @@ fn main() {
     let pan_mu = 0.05;
 
     // calculate number of mutations per genome per generation
-    let n_core_mutations = ((core_size as f64 * core_mu) / n_gen as f64) / 2.0 ;
-    let n_pan_mutations = ((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0;
+    let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
+    let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
     let core_weights : Vec<i32> = vec![1; core_size];
     let pan_weights : Vec<i32> = vec![1; pan_size];
