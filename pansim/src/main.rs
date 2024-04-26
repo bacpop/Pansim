@@ -1,6 +1,7 @@
 extern crate rand;
 extern crate statrs;
 extern crate rayon;
+extern crate ndarray;
 
 use rayon::prelude::*;
 
@@ -12,25 +13,20 @@ use rand::{Rng, SeedableRng};
 use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
 
-fn hamming_distance(row1: &Vec<i8>, row2: &Vec<i8>) -> f64 {
-    assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
+use ndarray::{ArrayView1, ArrayView2, Array2};
 
-    let mut distance = 0;
-    for (x, y) in row1.iter().zip(row2.iter()) {
-        if x != y {
-            distance += 1;
-        }
-    }
-
-    distance as f64 / row1.len() as f64
+fn hamming_distance_vectorized(a: ArrayView1<i8>, b: ArrayView1<i8>) -> f64 {
+    assert_eq!(a.len(), b.len(), "Vectors must have the same length");
+    a.iter().zip(b.iter()).filter(|&(x, y)| x != y).count() as f64 / a.len() as f64
 }
 
-fn pairwise_hamming_distances(matrix: &Vec<Vec<i8>>) -> Vec<f64> {
-    let mut distances = Vec::with_capacity(matrix.len() * (matrix.len() - 1) / 2); // Capacity for pairwise combinations
+fn pairwise_hamming_distances(matrix: ArrayView2<i8>) -> Vec<f64> {
+    let n_rows = matrix.shape()[0];
+    let mut distances = Vec::with_capacity(n_rows * (n_rows - 1) / 2); // Capacity for pairwise combinations
 
-    for i in 0..matrix.len() {
-        for j in i + 1..matrix.len() { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-            let distance = hamming_distance(&matrix[i], &matrix[j]);
+    for i in 0..n_rows {
+        for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
+            let distance = hamming_distance_vectorized(matrix.row(i), matrix.row(j));
             distances.push(distance);
         }
     }
@@ -206,7 +202,7 @@ fn main() {
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
     for j in 0..n_gen { // Run for n_gen generations
-        
+        let now_gen = Instant::now();
         // sample new individuals if not at first generation
         if j > 1 {
             let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
@@ -238,12 +234,18 @@ fn main() {
             }
         } else {
             // else calculate hamming and jaccard distances
-            let core_distances = pairwise_hamming_distances(&core_genome.pop);
-            let acc_distances = pairwise_jaccard_distances(&pan_genome.pop);
+
+            let ndarray_2d_i8 = Array2::from_shape_vec((pop_size, core_size), core_genome.pop.clone().into_iter().flatten().collect()).unwrap();
+            let core_distances = pairwise_hamming_distances(ndarray_2d_i8.view());
+            //let acc_distances = pairwise_jaccard_distances(&pan_genome.pop);
         }
+
+        let elapsed = now_gen.elapsed();
+        println!("Finished gen: {}", j);
+        println!("Elapsed: {:.2?}", elapsed);
     }
     let elapsed = now.elapsed();
-    println!("Elapsed: {:.2?}", elapsed);
+    println!("Total elapsed: {:.2?}", elapsed);
 
 
 }
