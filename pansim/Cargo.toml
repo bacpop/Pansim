@@ -10,3 +10,6 @@ authors = ["Samuel T. Horsfield <shorsfield@ebi.ac.uk>"]
 rand = "0.8.5"
 statrs = "0.16"
 rayon = "1.5"
+
+[profile.release]
+debug = true
