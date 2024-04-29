@@ -100,6 +100,8 @@ impl Population {
                 // thread-specific random number generator
                 let mut thread_rng = rng.clone();
                 let current_index = index.fetch_add(1, Ordering::SeqCst);
+                //let thread_index = rayon::current_thread_index();
+                //print!("{:?} ", thread_index);
 
                 // Jump the state of the generator for this thread
                 for _ in 0..current_index {
@@ -130,6 +132,8 @@ impl Population {
                     // thread-specific random number generator
                     let mut thread_rng = rng.clone();
                     let current_index = index.fetch_add(1, Ordering::SeqCst);
+                    //let thread_index = rayon::current_thread_index();
+                    //print!("{:?} ", thread_index);
 
                     // Jump the state of the generator for this thread
                     for _ in 0..current_index {
@@ -163,6 +167,9 @@ impl Population {
 
     fn pairwise_distances(&mut self, max_distances : usize, rng : &mut StdRng) -> Vec<f64> {
         let n_rows = self.pop.nrows();
+
+        // index for distances
+        let index = AtomicUsize::new(0);
     
         // determine which columns are all equal, ignore from distance calculations
         let array_f64 = self.pop.mapv(|x| x as f64);
@@ -180,30 +187,34 @@ impl Population {
         let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter).to_owned().reversed_axes();
         //println!("{:?}", self.pop);
         //println!("{:?}", subset_array);
-    
-        //let mut distances : Vec<f64> = vec![0.0; n_rows * (n_rows - 1) / 2]; // Capacity for pairwise combinations
         
         // sample distances with replacement
         let mut distances : Vec<f64> = vec![0.0; max_distances as usize]; // Capacity for pairwise combinations
 
+        // generate random numbers to sample indices
+        let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..=n_rows)).collect();
+        let range2: Vec<usize> = range1.iter().map(|&i| rng.gen_range(i + 1..=n_rows + 1)).collect();
+
         //let mut idx = 0;
-        for idx in 0..max_distances {
-            let i = rng.gen_range(0..n_rows) as usize;
-            let j = rng.gen_range(i + 1..n_rows + 1) as usize;
+        let range = 0..max_distances;
+        let distances: Vec<_> = range.into_par_iter().map(|current_index| {
+            let i = range1[current_index];
+            let j = range2[current_index];
             
             let row1 = subset_array.index_axis(Axis(0), i);
             let row2 = subset_array.index_axis(Axis(0), j);
 
+            let mut final_distance: f64 = 0.0;
+
             if self.core == true {
                 let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                let hamming_distance = distance as f64 / (column_variance.len() as f64);
-                distances[idx] = hamming_distance;
+                final_distance = distance as f64 / (column_variance.len() as f64);
             } else {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                let jaccard_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
-                distances[idx] = jaccard_distance;
+                final_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
             }
-        }
+            final_distance
+        }).collect();
         distances
         }
 }
@@ -212,7 +223,7 @@ fn main() {
     use std::time::Instant;
     let now = Instant::now();
     
-    let n_threads = 4;
+    let n_threads = 6;
     rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
 
     let pop_size = 1000;
