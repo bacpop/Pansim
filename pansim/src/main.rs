@@ -2,7 +2,6 @@ extern crate rand;
 extern crate statrs;
 extern crate rayon;
 extern crate ndarray;
-extern crate ndarray_parallel;
 
 use rayon::prelude::*;
 
@@ -14,21 +13,22 @@ use rand::{Rng, SeedableRng};
 use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
 
-use ndarray::{ArrayView1, ArrayView2, Array1, Array2, Axis, s, Array};
-//use ndarray_parallel::prelude::*;
+use ndarray::{Array1, Array2, Axis, s};
+use ndarray::parallel::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn hamming_distance(x: &[u8], y: &[u8]) -> u64 {
     assert_eq!(x.len(), y.len(), "Vectors must have the same length");
     x.iter().zip(y).fold(0, |a, (b, c)| a + (*b ^ *c).count_ones() as u64)
 }
 
-fn jaccard_distance(row1: &Vec<u8>, row2: &Vec<u8>) -> f64 {
+fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
     assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
 
     let intersection: usize = row1.iter().zip(row2.iter()).filter(|&(x, y)| *x == 1 && *y == 1).count();
     let union: usize = row1.iter().zip(row2.iter()).filter(|&(x, y)| *x == 1 || *y == 1).count();
 
-    1.0 - (intersection as f64 / union as f64)
+    (intersection, union)
 }
 
 
@@ -61,7 +61,7 @@ impl Population {
             .collect();
 
         // convert vector into 2D array
-        let mut pop = to_array2(pop_vec).unwrap();
+        let pop = to_array2(pop_vec).unwrap();
 
         let core_vec: Vec<Vec<u8>> = vec![vec![1, 2, 3],
                                           vec![0, 2, 3],
@@ -89,25 +89,20 @@ impl Population {
         self.pop = next_pop;
     }
 
-    fn mutate_alleles(&mut self, weights : &Vec<i32>, mutations : i32, n_threads : usize, rng : &StdRng) {
-
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(n_threads)  // Set the number of threads
-            .build()
-            .unwrap();
-
-        // Initialize xoshiro RNG
-        let a = Array::linspace(0., 63., 64).into_shape((4, 16)).unwrap();
-
+    fn mutate_alleles(&mut self, weights : &Vec<i32>, mutations : i32, rng : &StdRng) {
 
         let weighted_dist = WeightedIndex::new(weights).unwrap();
+        let index = AtomicUsize::new(0);
+
+
         if self.core == false {
-            (0..self.pop.nrows()).into_par_iter().for_each(|index| {
+            self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                 // thread-specific random number generator
                 let mut thread_rng = rng.clone();
-                    
+                let current_index = index.fetch_add(1, Ordering::SeqCst);
+
                 // Jump the state of the generator for this thread
-                for _ in 0..index {
+                for _ in 0..current_index {
                     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
                 }
                 
@@ -121,22 +116,23 @@ impl Population {
                 for _ in 0..n_sites {
                     // sample new site to mutate
                     let mutant_site = weighted_dist.sample(&mut thread_rng);
-                    //let value = self.pop[[index, mutant_site]];//.get_mut(mutant_site).unwrap();
-                    //let value = self.pop[i][mutant_site];
-                    let new_allele : u8 = if self.pop[[index, mutant_site]] == 0 as u8 { 1 } else { 0 };
+                    let value = row[mutant_site];
+                    let new_allele : u8 = if value == 0 as u8 { 1 } else { 0 };
+
 
                     // set value in place
-                    self.pop[[index, mutant_site]] = new_allele;
+                    row[mutant_site] = new_allele;
                 }
             }  
             );
         } else {
-            (0..self.pop.nrows()).into_par_iter().for_each(|index| {
+            self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                     // thread-specific random number generator
                     let mut thread_rng = rng.clone();
-                    
+                    let current_index = index.fetch_add(1, Ordering::SeqCst);
+
                     // Jump the state of the generator for this thread
-                    for _ in 0..index {
+                    for _ in 0..current_index {
                         thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
                     }
                     
@@ -152,14 +148,14 @@ impl Population {
                         let mutant_site = weighted_dist.sample(&mut thread_rng);
 
                         // get possible values to mutate to, must be different from current value
-                        let value = self.pop[[index, mutant_site]];
+                        let value = row[mutant_site];
                         let values = &self.core_vec[value as usize];
 
                         // sample new allele
                         let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
 
                         // set value in place
-                        self.pop[[index, mutant_site]] = *new_allele;
+                        row[mutant_site] = *new_allele;
                     }
                 });
         }
@@ -177,7 +173,9 @@ impl Population {
             .enumerate()
             .filter_map(|(idx, &avg)| if avg < 1.0 { Some(idx) } else { None })
             .collect();
-    
+        
+        let matches = column_averages.len() as f64 - columns_to_iter.len() as f64;
+
         let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
     
         let mut distances : Vec<f64> = vec![0.0; n_rows * (n_rows - 1) / 2]; // Capacity for pairwise combinations
@@ -187,15 +185,19 @@ impl Population {
             for i in 0..n_rows {
                 for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
                     let distance = hamming_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
-                    distances[idx] = distance;
+                    let hamming_distance = distance as f64 / (column_averages.len() as f64);
+                    
+                    distances[idx] = hamming_distance;
                     idx += 1;
                 }
             }
         } else {
             for i in 0..n_rows {
                 for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-                    let distance = hamming_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
-                    distances[idx] = distance;
+                    let (intersection, union) = jaccard_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
+                    let jaccard_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
+                    
+                    distances[idx] = jaccard_distance;
                     idx += 1;
                 }
             }
@@ -210,9 +212,10 @@ fn main() {
     let now = Instant::now();
     
     let n_threads = 4;
+    rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
 
     let pop_size = 1000;
-    let core_size = 2000000;
+    let core_size = 1200000;
     let pan_size = 6000;
     let n_gen = 100;
 
@@ -249,7 +252,7 @@ fn main() {
                     // mutate core genome
             //println!("started {}", j);
 
-            core_genome.mutate_alleles(&core_weights, n_core_mutations as i32, n_threads, &rng);
+            core_genome.mutate_alleles(&core_weights, n_core_mutations as i32, &rng);
 
             // Jump the state of the generator
             for _ in 0..pop_size {
@@ -257,7 +260,7 @@ fn main() {
             }
 
             //println!("finished mutating core genome {}", j);
-            pan_genome.mutate_alleles(&pan_weights, n_pan_mutations as i32, n_threads, &rng);
+            pan_genome.mutate_alleles(&pan_weights, n_pan_mutations as i32, &rng);
             //println!("finished mutating pangenome {}", j);
 
             // Jump the state of the generator
@@ -266,11 +269,8 @@ fn main() {
             }
         } else {
             // else calculate hamming and jaccard distances
-            let now_con = Instant::now();
-            let elapsed = now_con.elapsed();
-            println!("Elapsed conversion: {:.2?}", elapsed);
-            let core_distances = pairwise_hamming_distances(core_genome.pop.view());
-            //let acc_distances = pairwise_jaccard_distances(&pan_genome.pop);
+            let core_distances = core_genome.pairwise_distances();
+            let acc_distances = pan_genome.pairwise_distances();
         }
 
         let elapsed = now_gen.elapsed();
