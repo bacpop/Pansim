@@ -11,6 +11,7 @@ rand = "0.8.5"
 statrs = "0.16"
 rayon = "1.5"
 ndarray = "0.15.6"
+ndarray-parallel = "0.9.1"
 
 [profile.release]
 debug = true

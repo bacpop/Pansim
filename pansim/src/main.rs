@@ -2,6 +2,7 @@ extern crate rand;
 extern crate statrs;
 extern crate rayon;
 extern crate ndarray;
+extern crate ndarray_parallel;
 
 use rayon::prelude::*;
 
@@ -13,28 +14,15 @@ use rand::{Rng, SeedableRng};
 use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
 
-use ndarray::{ArrayView1, ArrayView2, Array2};
+use ndarray::{ArrayView1, ArrayView2, Array1, Array2, Axis, s, Array};
+//use ndarray_parallel::prelude::*;
 
-fn hamming_distance_vectorized(a: ArrayView1<i8>, b: ArrayView1<i8>) -> f64 {
-    assert_eq!(a.len(), b.len(), "Vectors must have the same length");
-    a.iter().zip(b.iter()).filter(|&(x, y)| x != y).count() as f64 / a.len() as f64
+fn hamming_distance(x: &[u8], y: &[u8]) -> u64 {
+    assert_eq!(x.len(), y.len(), "Vectors must have the same length");
+    x.iter().zip(y).fold(0, |a, (b, c)| a + (*b ^ *c).count_ones() as u64)
 }
 
-fn pairwise_hamming_distances(matrix: ArrayView2<i8>) -> Vec<f64> {
-    let n_rows = matrix.shape()[0];
-    let mut distances = Vec::with_capacity(n_rows * (n_rows - 1) / 2); // Capacity for pairwise combinations
-
-    for i in 0..n_rows {
-        for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-            let distance = hamming_distance_vectorized(matrix.row(i), matrix.row(j));
-            distances.push(distance);
-        }
-    }
-
-    distances
-}
-
-fn jaccard_distance(row1: &Vec<i8>, row2: &Vec<i8>) -> f64 {
+fn jaccard_distance(row1: &Vec<u8>, row2: &Vec<u8>) -> f64 {
     assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
 
     let intersection: usize = row1.iter().zip(row2.iter()).filter(|&(x, y)| *x == 1 && *y == 1).count();
@@ -43,40 +31,39 @@ fn jaccard_distance(row1: &Vec<i8>, row2: &Vec<i8>) -> f64 {
     1.0 - (intersection as f64 / union as f64)
 }
 
-fn pairwise_jaccard_distances(matrix: &Vec<Vec<i8>>) -> Vec<f64> {
-    let mut distances = Vec::with_capacity(matrix.len() * (matrix.len() - 1) / 2); // Capacity for pairwise combinations
-
-    for i in 0..matrix.len() {
-        for j in i + 1..matrix.len() { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-            let distance = jaccard_distance(&matrix[i], &matrix[j]);
-            distances.push(distance);
-        }
-    }
-
-    distances
-}
 
 struct Population {
-    pop: Vec<Vec<i8>>,
+    pop: Array2<u8>,
     core : bool,
-    core_vec : Vec<Vec<i8>>,
+    core_vec : Vec<Vec<u8>>,
+}
+
+fn to_array2<T: Copy>(source: Vec<Array1<T>>) -> Result<Array2<T>, impl std::error::Error> {
+    let width = source.len();
+    let flattened: Array1<T> = source.into_iter().flat_map(|row| row.to_vec()).collect();
+    let height = flattened.len() / width;
+    flattened.into_shape((width, height))
 }
 
 impl Population {
-    fn new(size: usize, allele_count: usize, max_variants: i8, core : bool) -> Self {
-        let mut pop: Vec<Vec<i8>> = vec![vec![0; allele_count]; size]; // each row is individual, each column is an allele
+    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool) -> Self {
+        //let mut pop = Array2::<u8>::zeros((size, allele_count));
 
-        let mut start: Vec<i8> = vec![0; allele_count];
+        let mut start: Array1<u8> = Array1::zeros(allele_count);
 
         for j in 0..allele_count {
             start[j] = rand::thread_rng().gen_range(0..max_variants);
         }
 
-        for i in 0..size {
-            pop[i] = start.clone();
-        }
+        // Create a vector of Array1 filled with the same values
+        let pop_vec: Vec<Array1<u8>> = std::iter::repeat(start)
+            .take(size)
+            .collect();
 
-        let core_vec: Vec<Vec<i8>> = vec![vec![1, 2, 3],
+        // convert vector into 2D array
+        let mut pop = to_array2(pop_vec).unwrap();
+
+        let core_vec: Vec<Vec<u8>> = vec![vec![1, 2, 3],
                                           vec![0, 2, 3],
                                           vec![0, 1, 3],
                                           vec![0, 1, 2]];
@@ -90,7 +77,14 @@ impl Population {
 
     fn next_generation(&mut self, sample : &Vec<usize>) {
 
-        let next_pop: Vec<Vec<i8>> = sample.iter().map(|&i| self.pop[i].clone()).collect();
+        // Create a new Array2 by sampling rows from the original Array2
+        let sampled_array = sample
+            .iter()
+            .map(|&i| self.pop.slice(s![i, ..]))
+            .collect::<Vec<_>>();
+        
+        // Concatenate the sampled rows into a new Array2
+        let next_pop = ndarray::stack(Axis(0), &sampled_array).unwrap();
 
         self.pop = next_pop;
     }
@@ -103,41 +97,41 @@ impl Population {
             .unwrap();
 
         // Initialize xoshiro RNG
+        let a = Array::linspace(0., 63., 64).into_shape((4, 16)).unwrap();
+
 
         let weighted_dist = WeightedIndex::new(weights).unwrap();
-        if self.core != false {
-            pool.install(|| {
-                self.pop.par_iter_mut().enumerate().for_each(|(index, row),  |  {
-                    // thread-specific random number generator
-                    let mut thread_rng = rng.clone();
+        if self.core == false {
+            (0..self.pop.nrows()).into_par_iter().for_each(|index| {
+                // thread-specific random number generator
+                let mut thread_rng = rng.clone();
                     
-                    // Jump the state of the generator for this thread
-                    for _ in 0..index {
-                        thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                    }
-                    
-                    // generate Poisson sampler
-                    let poisson = Poisson::new(mutations as f64).unwrap();
+                // Jump the state of the generator for this thread
+                for _ in 0..index {
+                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                }
+                
+                // generate Poisson sampler
+                let poisson = Poisson::new(mutations as f64).unwrap();
 
-                    // sample from Poisson distribution for number of sites to mutate in this isolate
-                    let n_sites = poisson.sample(&mut thread_rng) as usize;
+                // sample from Poisson distribution for number of sites to mutate in this isolate
+                let n_sites = poisson.sample(&mut thread_rng) as usize;
 
-                    // iterate for number of mutations required to reach mutation rate
-                    for _ in 0..n_sites {
-                        // sample new site to mutate
-                        let mutant_site = weighted_dist.sample(&mut thread_rng);
-                        let value = row.get_mut(mutant_site).unwrap();
-                        //let value = self.pop[i][mutant_site];
-                        let new_allele : i8 = if *value == 0 as i8 { 1 } else { 0 };
+                // iterate for number of mutations required to reach mutation rate
+                for _ in 0..n_sites {
+                    // sample new site to mutate
+                    let mutant_site = weighted_dist.sample(&mut thread_rng);
+                    //let value = self.pop[[index, mutant_site]];//.get_mut(mutant_site).unwrap();
+                    //let value = self.pop[i][mutant_site];
+                    let new_allele : u8 = if self.pop[[index, mutant_site]] == 0 as u8 { 1 } else { 0 };
 
-                        // set value in place
-                        *value = new_allele;
-                    }
-                });
-            });
+                    // set value in place
+                    self.pop[[index, mutant_site]] = new_allele;
+                }
+            }  
+            );
         } else {
-            pool.install(|| {
-                self.pop.par_iter_mut().enumerate().for_each(|(index, row),  |  {
+            (0..self.pop.nrows()).into_par_iter().for_each(|index| {
                     // thread-specific random number generator
                     let mut thread_rng = rng.clone();
                     
@@ -158,18 +152,56 @@ impl Population {
                         let mutant_site = weighted_dist.sample(&mut thread_rng);
 
                         // get possible values to mutate to, must be different from current value
-                        let value = row.get_mut(mutant_site).unwrap();
-                        let values = &self.core_vec[*value as usize];
+                        let value = self.pop[[index, mutant_site]];
+                        let values = &self.core_vec[value as usize];
 
                         // sample new allele
                         let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
 
                         // set value in place
-                        *value = *new_allele;
+                        self.pop[[index, mutant_site]] = *new_allele;
                     }
                 });
-            });
         }
+    }
+
+    fn pairwise_distances(&mut self) -> Vec<f64> {
+        // get column sums
+        let column_sums = self.pop.sum_axis(Axis(0));
+        let n_rows = self.pop.nrows();
+    
+        // determine which columns are all equal, ignore from distance calculations
+        let column_averages: Vec<f64> = column_sums.iter().map(|&sum | sum as f64 / self.pop.nrows() as f64).collect();
+        let columns_to_iter: Vec<usize> = column_averages
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &avg)| if avg < 1.0 { Some(idx) } else { None })
+            .collect();
+    
+        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
+    
+        let mut distances : Vec<f64> = vec![0.0; n_rows * (n_rows - 1) / 2]; // Capacity for pairwise combinations
+    
+        let mut idx = 0;
+        if self.core == true {
+            for i in 0..n_rows {
+                for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
+                    let distance = hamming_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
+                    distances[idx] = distance;
+                    idx += 1;
+                }
+            }
+        } else {
+            for i in 0..n_rows {
+                for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
+                    let distance = hamming_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
+                    distances[idx] = distance;
+                    idx += 1;
+                }
+            }
+        }
+
+        distances
     }
 }
 
@@ -234,9 +266,10 @@ fn main() {
             }
         } else {
             // else calculate hamming and jaccard distances
-
-            let ndarray_2d_i8 = Array2::from_shape_vec((pop_size, core_size), core_genome.pop.clone().into_iter().flatten().collect()).unwrap();
-            let core_distances = pairwise_hamming_distances(ndarray_2d_i8.view());
+            let now_con = Instant::now();
+            let elapsed = now_con.elapsed();
+            println!("Elapsed conversion: {:.2?}", elapsed);
+            let core_distances = pairwise_hamming_distances(core_genome.pop.view());
             //let acc_distances = pairwise_jaccard_distances(&pan_genome.pop);
         }
 
