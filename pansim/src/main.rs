@@ -162,30 +162,37 @@ impl Population {
     }
 
     fn pairwise_distances(&mut self) -> Vec<f64> {
-        // get column sums
-        let column_sums = self.pop.sum_axis(Axis(0));
         let n_rows = self.pop.nrows();
     
         // determine which columns are all equal, ignore from distance calculations
-        let column_averages: Vec<f64> = column_sums.iter().map(|&sum | sum as f64 / self.pop.nrows() as f64).collect();
-        let columns_to_iter: Vec<usize> = column_averages
+        let array_f64 = self.pop.mapv(|x| x as f64);
+        let column_variance = array_f64.var_axis(Axis(0), 0.0);
+
+        // Determine which column indices have variance greater than 0
+        let columns_to_iter: Vec<usize> = column_variance
             .iter()
             .enumerate()
-            .filter_map(|(idx, &avg)| if avg < 1.0 { Some(idx) } else { None })
+            .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
             .collect();
         
-        let matches = column_averages.len() as f64 - columns_to_iter.len() as f64;
+        let matches = column_variance.len() as f64 - columns_to_iter.len() as f64;
 
-        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
+        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter).to_owned().reversed_axes();
+        //println!("{:?}", self.pop);
+        //println!("{:?}", subset_array);
     
         let mut distances : Vec<f64> = vec![0.0; n_rows * (n_rows - 1) / 2]; // Capacity for pairwise combinations
-    
+        
+        // sample here to only compare subset of all pairwise distances?
+
         let mut idx = 0;
         if self.core == true {
             for i in 0..n_rows {
+                let row1 = subset_array.index_axis(Axis(0), i);
                 for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-                    let distance = hamming_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
-                    let hamming_distance = distance as f64 / (column_averages.len() as f64);
+                    let row2 = subset_array.index_axis(Axis(0), j);
+                    let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                    let hamming_distance = distance as f64 / (column_variance.len() as f64);
                     
                     distances[idx] = hamming_distance;
                     idx += 1;
@@ -193,8 +200,10 @@ impl Population {
             }
         } else {
             for i in 0..n_rows {
+                let row1 = subset_array.index_axis(Axis(0), i);
                 for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-                    let (intersection, union) = jaccard_distance(self.pop.row(i).as_slice().unwrap(), self.pop.row(j).as_slice().unwrap());
+                    let row2 = subset_array.index_axis(Axis(0), j);
+                    let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
                     let jaccard_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
                     
                     distances[idx] = jaccard_distance;
