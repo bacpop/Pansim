@@ -161,7 +161,7 @@ impl Population {
         }
     }
 
-    fn pairwise_distances(&mut self) -> Vec<f64> {
+    fn pairwise_distances(&mut self, max_distances : usize, rng : &mut StdRng) -> Vec<f64> {
         let n_rows = self.pop.nrows();
     
         // determine which columns are all equal, ignore from distance calculations
@@ -181,39 +181,31 @@ impl Population {
         //println!("{:?}", self.pop);
         //println!("{:?}", subset_array);
     
-        let mut distances : Vec<f64> = vec![0.0; n_rows * (n_rows - 1) / 2]; // Capacity for pairwise combinations
+        //let mut distances : Vec<f64> = vec![0.0; n_rows * (n_rows - 1) / 2]; // Capacity for pairwise combinations
         
-        // sample here to only compare subset of all pairwise distances?
+        // sample distances with replacement
+        let mut distances : Vec<f64> = vec![0.0; max_distances as usize]; // Capacity for pairwise combinations
 
-        let mut idx = 0;
-        if self.core == true {
-            for i in 0..n_rows {
-                let row1 = subset_array.index_axis(Axis(0), i);
-                for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-                    let row2 = subset_array.index_axis(Axis(0), j);
-                    let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                    let hamming_distance = distance as f64 / (column_variance.len() as f64);
-                    
-                    distances[idx] = hamming_distance;
-                    idx += 1;
-                }
-            }
-        } else {
-            for i in 0..n_rows {
-                let row1 = subset_array.index_axis(Axis(0), i);
-                for j in i + 1..n_rows { // Start from i+1 to avoid duplicate pairs and comparing row with itself
-                    let row2 = subset_array.index_axis(Axis(0), j);
-                    let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                    let jaccard_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
-                    
-                    distances[idx] = jaccard_distance;
-                    idx += 1;
-                }
+        //let mut idx = 0;
+        for idx in 0..max_distances {
+            let i = rng.gen_range(0..n_rows) as usize;
+            let j = rng.gen_range(i + 1..n_rows + 1) as usize;
+            
+            let row1 = subset_array.index_axis(Axis(0), i);
+            let row2 = subset_array.index_axis(Axis(0), j);
+
+            if self.core == true {
+                let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                let hamming_distance = distance as f64 / (column_variance.len() as f64);
+                distances[idx] = hamming_distance;
+            } else {
+                let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                let jaccard_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
+                distances[idx] = jaccard_distance;
             }
         }
-
         distances
-    }
+        }
 }
 
 fn main() {
@@ -227,6 +219,8 @@ fn main() {
     let core_size = 1200000;
     let pan_size = 6000;
     let n_gen = 100;
+
+    let max_distances: usize = 100000;
 
     // core and pangenome mutation rates
     let core_mu = 0.05;
@@ -278,8 +272,8 @@ fn main() {
             }
         } else {
             // else calculate hamming and jaccard distances
-            let core_distances = core_genome.pairwise_distances();
-            let acc_distances = pan_genome.pairwise_distances();
+            let core_distances = core_genome.pairwise_distances(max_distances, &mut rng);
+            let acc_distances = pan_genome.pairwise_distances(max_distances, &mut rng);
         }
 
         let elapsed = now_gen.elapsed();
