@@ -14,8 +14,10 @@ use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
 
 use ndarray::{Array1, Array2, Axis, s};
-use ndarray::parallel::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use std::fs::File;
+use std::io::{self, Write};
 
 fn hamming_distance(x: &[u8], y: &[u8]) -> u64 {
     assert_eq!(x.len(), y.len(), "Vectors must have the same length");
@@ -38,6 +40,7 @@ struct Population {
     core_vec : Vec<Vec<u8>>,
 }
 
+// stacks vector of arrays into 2D array
 fn to_array2<T: Copy>(source: Vec<Array1<T>>) -> Result<Array2<T>, impl std::error::Error> {
     let width = source.len();
     let flattened: Array1<T> = source.into_iter().flat_map(|row| row.to_vec()).collect();
@@ -89,7 +92,7 @@ impl Population {
         self.pop = next_pop;
     }
 
-    fn mutate_alleles(&mut self, weights : &Vec<i32>, mutations : i32, rng : &StdRng) {
+    fn mutate_alleles(&mut self, weights : &Vec<f32>, mutations : i32, rng : &StdRng) {
 
         let weighted_dist = WeightedIndex::new(weights).unwrap();
         let index = AtomicUsize::new(0);
@@ -165,11 +168,9 @@ impl Population {
         }
     }
 
-    fn pairwise_distances(&mut self, max_distances : usize, rng : &mut StdRng) -> Vec<f64> {
-        let n_rows = self.pop.nrows();
-
+    fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
         // index for distances
-        let index = AtomicUsize::new(0);
+        let _index = AtomicUsize::new(0);
     
         // determine which columns are all equal, ignore from distance calculations
         let array_f64 = self.pop.mapv(|x| x as f64);
@@ -189,11 +190,7 @@ impl Population {
         //println!("{:?}", subset_array);
         
         // sample distances with replacement
-        let mut distances : Vec<f64> = vec![0.0; max_distances as usize]; // Capacity for pairwise combinations
-
-        // generate random numbers to sample indices
-        let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..=n_rows)).collect();
-        let range2: Vec<usize> = range1.iter().map(|&i| rng.gen_range(i + 1..=n_rows + 1)).collect();
+        //let mut distances : Vec<f64> = vec![0.0; max_distances as usize]; // Capacity for pairwise combinations
 
         //let mut idx = 0;
         let range = 0..max_distances;
@@ -204,16 +201,16 @@ impl Population {
             let row1 = subset_array.index_axis(Axis(0), i);
             let row2 = subset_array.index_axis(Axis(0), j);
 
-            let mut final_distance: f64 = 0.0;
+            let mut _final_distance: f64 = 0.0;
 
             if self.core == true {
                 let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                final_distance = distance as f64 / (column_variance.len() as f64);
+                _final_distance = distance as f64 / (column_variance.len() as f64);
             } else {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                final_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
+                _final_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
             }
-            final_distance
+            _final_distance
         }).collect();
         distances
         }
@@ -223,26 +220,42 @@ fn main() {
     use std::time::Instant;
     let now = Instant::now();
     
+    // multithreading
     let n_threads = 6;
     rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
 
+    // wright fisher parameters
     let pop_size = 1000;
     let core_size = 1200000;
     let pan_size = 6000;
-    let n_gen = 100;
+    let n_gen = 2;
 
+    let output = "/Users/shorsfield/Documents/Software/Pansim/distances.tsv";
+
+    // maximum number of distances to calculate for population
     let max_distances: usize = 100000;
 
     // core and pangenome mutation rates
     let core_mu = 0.05;
     let pan_mu = 0.05;
 
+    // for two-speed accessory model
+    let proportion_fast = 0.5;
+    let speed_fast = 2.0;
+
     // calculate number of mutations per genome per generation
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
-    let core_weights : Vec<i32> = vec![1; core_size];
-    let pan_weights : Vec<i32> = vec![1; pan_size];
+    // set weights for sampling of sites
+    let core_weights : Vec<f32> = vec![1.0; core_size];
+    let mut pan_weights : Vec<f32> = vec![1.0; pan_size];
+
+    // calculate sites for fast accessory genome
+    let num_fast_sites = (pan_size as f32 * proportion_fast).round() as usize;
+    for i in 0..num_fast_sites {
+        pan_weights[i] = speed_fast;
+    }
 
     let mut core_genome = Population::new(pop_size, core_size, 4, true); // core genome alignment
     let mut pan_genome = Population::new(pop_size, pan_size, 2, false); // pangenome alignment
@@ -253,7 +266,7 @@ fn main() {
     for j in 0..n_gen { // Run for n_gen generations
         let now_gen = Instant::now();
         // sample new individuals if not at first generation
-        if j > 1 {
+        if j > 0 {
             let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
             core_genome.next_generation(& sampled_individuals);
             //println!("finished copying core genome {}", j);
@@ -283,8 +296,19 @@ fn main() {
             }
         } else {
             // else calculate hamming and jaccard distances
-            let core_distances = core_genome.pairwise_distances(max_distances, &mut rng);
-            let acc_distances = pan_genome.pairwise_distances(max_distances, &mut rng);
+            // generate random numbers to sample indices
+            let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
+            let range2: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
+
+            let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
+            let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
+
+            let mut file = File::create(output)?;
+
+            // Iterate through the vectors and write each pair to the file
+            for (core, acc) in core_distances.iter().zip(acc_distances.iter()) {
+                writeln!(file, "{}\t{}", core, acc);
+            }
         }
 
         let elapsed = now_gen.elapsed();
