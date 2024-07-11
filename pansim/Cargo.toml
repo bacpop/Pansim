@@ -10,6 +10,7 @@ authors = ["Samuel T. Horsfield <shorsfield@ebi.ac.uk>"]
 rand = "0.8.5"
 statrs = "0.16"
 rayon = "1.5"
+ndarray = { version = "0.15.6", features = ["rayon"] }
 
 [profile.release]
 debug = true
