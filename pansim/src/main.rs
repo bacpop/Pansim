@@ -216,7 +216,7 @@ impl Population {
         }
 }
 
-fn main() {
+fn main() -> io::Result<()> {
     use std::time::Instant;
     let now = Instant::now();
     
@@ -318,5 +318,5 @@ fn main() {
     let elapsed = now.elapsed();
     println!("Total elapsed: {:.2?}", elapsed);
 
-
+    Ok(())
 }
