@@ -23,7 +23,7 @@ use clap::{Arg, Command};
 
 fn hamming_distance(x: &[u8], y: &[u8]) -> u64 {
     assert_eq!(x.len(), y.len(), "Vectors must have the same length");
-    x.iter().zip(y).fold(0, |a, (b, c)| a + (*b ^ *c).count_ones() as u64)
+    x.iter().zip(y).filter(|&(a, b)| a != b).count() as u64
 }
 
 fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
@@ -34,7 +34,6 @@ fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
 
     (intersection, union)
 }
-
 
 struct Population {
     pop: Array2<u8>,
@@ -155,6 +154,8 @@ impl Population {
                         // sample new allele
                         let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
 
+                        // TODO update rng for all times thread_rng is sampled!
+
                         // set value in place
                         row[mutant_site] = *new_allele;
                     }
@@ -180,8 +181,8 @@ impl Population {
         let matches = column_variance.len() as f64 - columns_to_iter.len() as f64;
 
         let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter).to_owned().reversed_axes();
-        //println!("{:?}", self.pop);
-        //println!("{:?}", subset_array);
+        println!("{:?}", self.pop);
+        println!("{:?}", subset_array);
         
         // sample distances with replacement
         //let mut distances : Vec<f64> = vec![0.0; max_distances as usize]; // Capacity for pairwise combinations
@@ -191,9 +192,15 @@ impl Population {
         let distances: Vec<_> = range.into_par_iter().map(|current_index| {
             let i = range1[current_index];
             let j = range2[current_index];
+
+            println!("j:\n{:?}", j);
+            println!("i:\n{:?}", i);
             
             let row1 = subset_array.index_axis(Axis(0), i);
             let row2 = subset_array.index_axis(Axis(0), j);
+
+            println!("rowj:\n{:?}", row1);
+            println!("rowi:\n{:?}", row2);
 
             let mut _final_distance: f64 = 0.0;
 
@@ -204,6 +211,7 @@ impl Population {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
                 _final_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
             }
+            println!("_final_distance:\n{:?}", _final_distance);
             _final_distance
         }).collect();
         distances
@@ -221,22 +229,22 @@ fn main() -> io::Result<()> {
         .long("pop_size")
         .help("Number of individuals in population.")
         .required(false)
-        .default_value("1000"))
+        .default_value("10"))
     .arg(Arg::new("core_size")
         .long("core_size")
         .help("Number of nucleotides in core genome.")
         .required(false)
-        .default_value("1200000"))
+        .default_value("100"))
     .arg(Arg::new("pan_size")
         .long("pan_size")
         .help("Number of genes in pangenome.")
         .required(false)
-        .default_value("6000"))
+        .default_value("100"))
     .arg(Arg::new("n_gen")
         .long("n_gen")
         .help("Number of generations to simulate.")
         .required(false)
-        .default_value("100"))
+        .default_value("10"))
     .arg(Arg::new("max_distances")
         .long("max_distances")
         .help("Maximum number of pairwise distances to calculate.")
@@ -251,7 +259,7 @@ fn main() -> io::Result<()> {
         .long("pan_mu")
         .help("Maximum average pairwise pangenome distance to achieve by end of simulation.")
         .required(false)
-        .default_value("0.05"))
+        .default_value("0.2"))
     .arg(Arg::new("proportion_fast")
         .long("proportion_fast")
         .help("Proportion of genes in pangenome in fast compartment.")
@@ -296,8 +304,10 @@ fn main() -> io::Result<()> {
     let proportion_fast: f32 = matches.value_of_t("proportion_fast").unwrap();
     let speed_fast: f32 = matches.value_of_t("speed_fast").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
-    let verbose = matches.is_present("verbose");
+    //let verbose = matches.is_present("verbose");
     let seed: u64 = matches.value_of_t("seed").unwrap();
+
+    let verbose = true;
 
     // time testing
     //use std::time::Instant;
