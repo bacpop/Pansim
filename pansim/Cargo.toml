@@ -11,6 +11,7 @@ rand = "0.8.5"
 statrs = "0.16"
 rayon = "1.5"
 ndarray = { version = "0.15.6", features = ["rayon"] }
+clap = "3.0"
 
 [profile.release]
 debug = true
