@@ -180,12 +180,9 @@ impl Population {
         
         let matches = column_variance.len() as f64 - columns_to_iter.len() as f64;
 
-        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter).to_owned().reversed_axes();
+        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter).to_owned();
         println!("{:?}", self.pop);
         println!("{:?}", subset_array);
-        
-        // sample distances with replacement
-        //let mut distances : Vec<f64> = vec![0.0; max_distances as usize]; // Capacity for pairwise combinations
 
         //let mut idx = 0;
         let range = 0..max_distances;
@@ -193,14 +190,14 @@ impl Population {
             let i = range1[current_index];
             let j = range2[current_index];
 
-            println!("j:\n{:?}", j);
             println!("i:\n{:?}", i);
+            println!("j:\n{:?}", j);
             
             let row1 = subset_array.index_axis(Axis(0), i);
             let row2 = subset_array.index_axis(Axis(0), j);
 
-            println!("rowj:\n{:?}", row1);
-            println!("rowi:\n{:?}", row2);
+            println!("rowi:\n{:?}", row1);
+            println!("rowj:\n{:?}", row2);
 
             let mut _final_distance: f64 = 0.0;
 
