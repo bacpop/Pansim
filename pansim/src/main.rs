@@ -94,13 +94,12 @@ impl Population {
         self.pop = next_pop;
     }
 
-    fn mutate_alleles(&mut self, weights : &Vec<f32>, mutations : i32, rng : &StdRng) {
-
-        let weighted_dist = WeightedIndex::new(weights).unwrap();
+    fn mutate_alleles(&mut self, mutations : i32, rng : &StdRng, weighted_dist: &WeightedIndex<f32>) {
         let index = AtomicUsize::new(0);
-
+        let poisson = Poisson::new(mutations as f64).unwrap();
 
         if self.core == false {
+            // generate Poisson sampler
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                 // thread-specific random number generator
                 let mut thread_rng = rng.clone();
@@ -113,9 +112,6 @@ impl Population {
                     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
                 }
                 
-                // generate Poisson sampler
-                let poisson = Poisson::new(mutations as f64).unwrap();
-
                 // sample from Poisson distribution for number of sites to mutate in this isolate
                 let n_sites = poisson.sample(&mut thread_rng) as usize;
 
@@ -125,7 +121,6 @@ impl Population {
                     let mutant_site = weighted_dist.sample(&mut thread_rng);
                     let value = row[mutant_site];
                     let new_allele : u8 = if value == 0 as u8 { 1 } else { 0 };
-
 
                     // set value in place
                     row[mutant_site] = new_allele;
@@ -144,9 +139,6 @@ impl Population {
                     for _ in 0..current_index {
                         thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
                     }
-                    
-                    // generate Poisson sampler
-                    let poisson = Poisson::new(mutations as f64).unwrap();
 
                     // sample from Poisson distribution for number of sites to mutate in this isolate
                     let n_sites = thread_rng.sample(poisson) as usize;
@@ -249,7 +241,7 @@ fn main() -> io::Result<()> {
         .long("max_distances")
         .help("Maximum number of pairwise distances to calculate.")
         .required(false)
-        .default_value("100000"))
+        .default_value("100"))
     .arg(Arg::new("core_mu")
         .long("core_mu")
         .help("Maximum average pairwise core distance to achieve by end of simulation.")
@@ -363,6 +355,10 @@ fn main() -> io::Result<()> {
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
+    // weighted distribution samplers
+    let core_weighted_dist = WeightedIndex::new(core_weights).unwrap();
+    let pan_weighted_dist = WeightedIndex::new(pan_weights).unwrap();
+
     for j in 0..n_gen { // Run for n_gen generations
         //let now_gen = Instant::now();
         
@@ -380,7 +376,7 @@ fn main() -> io::Result<()> {
             // mutate core genome
             //println!("started {}", j);
 
-            core_genome.mutate_alleles(&core_weights, n_core_mutations as i32, &rng);
+            core_genome.mutate_alleles(n_core_mutations as i32, &rng, &core_weighted_dist);
 
             // Jump the state of the generator
             for _ in 0..pop_size {
@@ -388,7 +384,7 @@ fn main() -> io::Result<()> {
             }
 
             //println!("finished mutating core genome {}", j);
-            pan_genome.mutate_alleles(&pan_weights, n_pan_mutations as i32, &rng);
+            pan_genome.mutate_alleles(n_pan_mutations as i32, &rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
 
             // Jump the state of the generator
