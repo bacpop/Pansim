@@ -18,6 +18,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use std::fs::File;
 use std::io::{self, Write};
+use std::usize;
+use clap::{Arg, Command};
 
 fn hamming_distance(x: &[u8], y: &[u8]) -> u64 {
     assert_eq!(x.len(), y.len(), "Vectors must have the same length");
@@ -217,31 +219,117 @@ impl Population {
 }
 
 fn main() -> io::Result<()> {
-    use std::time::Instant;
-    let now = Instant::now();
-    
-    // multithreading
-    let n_threads = 6;
+
+    // Define the command-line arguments using clap
+    let matches = Command::new("pansim")
+    .version("0.0.1")
+    .author("Samuel Horsfield shorsfield@ebi.ac.uk")
+    .about("Runs Wright-Fisher simulation, simulating neutral core genome evolution and two-speed accessory genome evolution.")
+    .arg(Arg::new("pop_size")
+        .help("Number of individuals in population. Default = 1000")
+        .required(false)
+        .default_value("1000"))
+    .arg(Arg::new("core_size")
+        .help("Number of nucleotides in core genome. Default = 1200000")
+        .required(false)
+        .default_value("1200000"))
+    .arg(Arg::new("pan_size")
+        .help("Number of genes in pangenome. Default = 6000")
+        .required(false)
+        .default_value("6000"))
+    .arg(Arg::new("n_gen")
+        .help("Number of generations to simulate. Default = 100")
+        .required(false)
+        .default_value("100"))
+    .arg(Arg::new("max_distances")
+        .help("Maximum number of pairwise distances to calculate. Default = 100000")
+        .required(false)
+        .default_value("100000"))
+    .arg(Arg::new("core_mu")
+        .help("Maximum average pairwise core distance to achieve by end of simulation. Default = 0.05")
+        .required(false)
+        .default_value("0.05"))
+    .arg(Arg::new("pan_mu")
+        .help("Maximum average pairwise pangenome distance to achieve by end of simulation. Default = 0.05")
+        .required(false)
+        .default_value("0.05"))
+    .arg(Arg::new("proportion_fast")
+        .help("Proportion of genes in pangenome in fast compartment. Default = 0.5")
+        .required(false)
+        .default_value("0.5"))
+    .arg(Arg::new("speed_fast")
+        .help("Proportional difference in speed of mutation between slow and fast genes. Must be >=1.0. Default = 2.0")
+        .required(false)
+        .default_value("2.0"))
+    .arg(Arg::new("seed")
+        .help("Seed for random number generation. Default = 0")
+        .required(false)
+        .default_value("0"))
+    .arg(Arg::new("output")
+        .help("Output file path. Default = 'distances.tsv'")
+        .required(false)
+        .default_value("distances.tsv"))
+    .arg(Arg::new("threads")
+        .help("Number of threads. Default = 1")
+        .required(false)
+        .default_value("1"))
+    .arg(Arg::new("verbose")
+        .help("Prints generation and time to completion")
+        .required(false)
+        .takes_value(false))
+    .get_matches();
+
+    // Set the argument to a variable
+    let pop_size: usize = matches.value_of_t("pop_size").unwrap();
+    let core_size: usize = matches.value_of_t("core_size").unwrap();
+    let pan_size: usize = matches.value_of_t("pan_size").unwrap();
+    let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
+    let output = matches.value_of("output").unwrap_or("distances.tsv");
+    let max_distances: usize = matches.value_of_t("max_distances").unwrap();
+    let core_mu: f64 = matches.value_of_t("core_mu").unwrap();
+    let pan_mu: f64 = matches.value_of_t("pan_mu").unwrap();
+    let proportion_fast: f32 = matches.value_of_t("proportion_fast").unwrap();
+    let speed_fast: f32 = matches.value_of_t("speed_fast").unwrap();
+    let mut n_threads: usize = matches.value_of_t("threads").unwrap();
+    let verbose = matches.is_present("verbose");
+    let seed: u64 = matches.value_of_t("seed").unwrap();
+
+    // time testing
+    //use std::time::Instant;
+    //let now = Instant::now();
+
+    // validate all variables
+    if (proportion_fast < 0.0) || (proportion_fast > 1.0) {
+        println!("proportion_fast must be between 0.0 and 1.0");
+        return Ok(())
+    }
+
+    if speed_fast < 1.0 {
+        println!("speed_fast must be above 1.0");
+        return Ok(())
+    }
+
+    if (pop_size < 1) || (core_size < 1) || (pan_size < 1) || (n_gen < 1) || (max_distances < 1) {
+        println!("pop_size, core_size, pan_size, n_gen and max_distances must all be above 1");
+        return Ok(())
+    }
+
+    if (core_mu < 0.0) || (core_mu > 1.0) {
+        println!("core_mu must be between 0.0 and 1.0");
+        return Ok(())
+    }
+
+    if (pan_mu < 0.0) || (pan_mu > 1.0) {
+        println!("core_mu must be between 0.0 and 1.0");
+        return Ok(())
+    }
+
+    if n_threads < 1 {
+        n_threads = 1;
+    }
+
+    // enable multithreading
     rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
-
-    // wright fisher parameters
-    let pop_size = 1000;
-    let core_size = 1200000;
-    let pan_size = 6000;
-    let n_gen = 2;
-
-    let output = "/Users/shorsfield/Documents/Software/Pansim/distances.tsv";
-
-    // maximum number of distances to calculate for population
-    let max_distances: usize = 100000;
-
-    // core and pangenome mutation rates
-    let core_mu = 0.05;
-    let pan_mu = 0.05;
-
-    // for two-speed accessory model
-    let proportion_fast = 0.5;
-    let speed_fast = 2.0;
 
     // calculate number of mutations per genome per generation
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
@@ -260,11 +348,11 @@ fn main() -> io::Result<()> {
     let mut core_genome = Population::new(pop_size, core_size, 4, true); // core genome alignment
     let mut pan_genome = Population::new(pop_size, pan_size, 2, false); // pangenome alignment
 
-    let seed: u64 = 0;
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
     for j in 0..n_gen { // Run for n_gen generations
-        let now_gen = Instant::now();
+        //let now_gen = Instant::now();
+        
         // sample new individuals if not at first generation
         if j > 0 {
             let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
@@ -276,7 +364,7 @@ fn main() -> io::Result<()> {
         
         // if at final generation, just sample, otherwise mutate
         if j < (n_gen - 1) {
-                    // mutate core genome
+            // mutate core genome
             //println!("started {}", j);
 
             core_genome.mutate_alleles(&core_weights, n_core_mutations as i32, &rng);
@@ -311,12 +399,19 @@ fn main() -> io::Result<()> {
             }
         }
 
-        let elapsed = now_gen.elapsed();
-        println!("Finished gen: {}", j);
-        println!("Elapsed: {:.2?}", elapsed);
+        //let elapsed = now_gen.elapsed();
+        if verbose {
+            println!("Finished gen: {}", j + 1);    
+        }
+        //println!("Elapsed: {:.2?}", elapsed);
     }
-    let elapsed = now.elapsed();
-    println!("Total elapsed: {:.2?}", elapsed);
+    //let elapsed = now.elapsed();
+    
+    // if verbose {
+    //     println!("Total elapsed: {:.2?}", elapsed);
+    // }
 
-    Ok(())
+    // println!("Total elapsed: {:.2?}", elapsed);
+
+    return Ok(())
 }
