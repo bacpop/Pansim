@@ -14,4 +14,4 @@ ndarray = { version = "0.15.6", features = ["rayon"] }
 clap = "3.0"
 
 [profile.release]
-debug = true
+debug = false 
