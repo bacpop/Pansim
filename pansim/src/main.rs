@@ -185,8 +185,10 @@ impl Population {
         }
         
         let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
+        let mut contiguous_array = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
+        contiguous_array.assign(&subset_array);
         //println!("{:?}", self.pop);
-        //println!("{:?}", subset_array);
+        //println!("{:?}", contiguous_array);
 
         //let mut idx = 0;
         let range = 0..max_distances;
@@ -197,8 +199,8 @@ impl Population {
             //println!("i:\n{:?}", i);
             //println!("j:\n{:?}", j);
             
-            let row1 = subset_array.index_axis(Axis(0), i).to_owned();
-            let row2 = subset_array.index_axis(Axis(0), j).to_owned();
+            let row1 = contiguous_array.index_axis(Axis(0), i);
+            let row2 = contiguous_array.index_axis(Axis(0), j);
 
             //println!("rowi:\n{:?}", row1);
             //println!("rowj:\n{:?}", row2);
@@ -285,7 +287,7 @@ fn main() -> io::Result<()> {
         .long("threads")
         .help("Number of threads.")
         .required(false)
-        .default_value("6"))
+        .default_value("1"))
     .arg(Arg::new("verbose")
         .long("verbose")
         .help("Prints generation and time to completion")
