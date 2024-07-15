@@ -93,8 +93,11 @@ impl Population {
         self.pop = next_pop;
     }
 
-    fn mutate_alleles(&mut self, mutations : i32, rng : &StdRng, weighted_dist: &WeightedIndex<f32>) {
-        let index = AtomicUsize::new(0);
+    fn mutate_alleles(&mut self, mutations : i32, rng : &mut StdRng, weighted_dist: &WeightedIndex<f32>) {
+        // index for random number generation
+        let _index = AtomicUsize::new(0);
+        let _update_rng = AtomicUsize::new(0);
+
         let poisson = Poisson::new(mutations as f64).unwrap();
 
         if self.core == false {
@@ -102,7 +105,7 @@ impl Population {
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                 // thread-specific random number generator
                 let mut thread_rng = rng.clone();
-                let current_index = index.fetch_add(1, Ordering::SeqCst);
+                let current_index = _index.fetch_add(1, Ordering::SeqCst);
                 //let thread_index = rayon::current_thread_index();
                 //print!("{:?} ", thread_index);
 
@@ -113,11 +116,13 @@ impl Population {
                 
                 // sample from Poisson distribution for number of sites to mutate in this isolate
                 let n_sites = poisson.sample(&mut thread_rng) as usize;
+                _update_rng.fetch_add(1, Ordering::SeqCst);
 
                 // iterate for number of mutations required to reach mutation rate
                 for _ in 0..n_sites {
                     // sample new site to mutate
                     let mutant_site = weighted_dist.sample(&mut thread_rng);
+                    _update_rng.fetch_add(1, Ordering::SeqCst);
                     let value = row[mutant_site];
                     let new_allele : u8 = if value == 0 as u8 { 1 } else { 0 };
 
@@ -130,7 +135,7 @@ impl Population {
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                     // thread-specific random number generator
                     let mut thread_rng = rng.clone();
-                    let current_index = index.fetch_add(1, Ordering::SeqCst);
+                    let current_index = _index.fetch_add(1, Ordering::SeqCst);
                     //let thread_index = rayon::current_thread_index();
                     //print!("{:?} ", thread_index);
 
@@ -138,6 +143,7 @@ impl Population {
                     for _ in 0..current_index {
                         thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
                     }
+                    _update_rng.fetch_add(1, Ordering::SeqCst);
 
                     // sample from Poisson distribution for number of sites to mutate in this isolate
                     let n_sites = thread_rng.sample(poisson) as usize;
@@ -146,6 +152,7 @@ impl Population {
                     for _ in 0..n_sites {
                         // sample new site to mutate
                         let mutant_site = weighted_dist.sample(&mut thread_rng);
+                        _update_rng.fetch_add(1, Ordering::SeqCst);
 
                         // get possible values to mutate to, must be different from current value
                         let value = row[mutant_site];
@@ -153,6 +160,7 @@ impl Population {
 
                         // sample new allele
                         let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
+                        _update_rng.fetch_add(1, Ordering::SeqCst);
 
                         // TODO update rng for all times thread_rng is sampled!
 
@@ -161,12 +169,16 @@ impl Population {
                     }
                 });
         }
+        // update rng in place
+        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        //print!("{:?} ", rng_index);
+        for _ in 0..rng_index {
+            rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        }
+
     }
 
     fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
-        // index for distances
-        let _index = AtomicUsize::new(0);
-    
         // determine which columns are all equal, ignore from distance calculations
         let array_f64 = self.pop.mapv(|x| x as f64);
         let column_variance = array_f64.var_axis(Axis(0), 0.0);
@@ -307,10 +319,10 @@ fn main() -> io::Result<()> {
     let proportion_fast: f32 = matches.value_of_t("proportion_fast").unwrap();
     let speed_fast: f32 = matches.value_of_t("speed_fast").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
-    //let verbose = matches.is_present("verbose");
+    let verbose = matches.is_present("verbose");
     let seed: u64 = matches.value_of_t("seed").unwrap();
 
-    let verbose = true;
+    //let verbose = true;
 
     // time testing
     //use std::time::Instant;
@@ -388,22 +400,11 @@ fn main() -> io::Result<()> {
         if j < (n_gen - 1) {
             // mutate core genome
             //println!("started {}", j);
-
-            core_genome.mutate_alleles(n_core_mutations as i32, &rng, &core_weighted_dist);
-
-            // Jump the state of the generator
-            for _ in 0..pop_size {
-                rng.gen::<u64>(); // Discard some numbers to mimic jumping
-            }
+            core_genome.mutate_alleles(n_core_mutations as i32, &mut rng, &core_weighted_dist);
 
             //println!("finished mutating core genome {}", j);
-            pan_genome.mutate_alleles(n_pan_mutations as i32, &rng, &pan_weighted_dist);
+            pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
-
-            // Jump the state of the generator
-            for _ in 0..pop_size {
-                rng.gen::<u64>(); // Discard some numbers to mimic jumping
-            }
         } else {
             // else calculate hamming and jaccard distances
             // generate random numbers to sample indices
