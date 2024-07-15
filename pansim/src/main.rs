@@ -177,12 +177,16 @@ impl Population {
             .enumerate()
             .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
             .collect();
-        
-        let matches = column_variance.len() as f64 - columns_to_iter.len() as f64;
 
-        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter).to_owned();
-        println!("{:?}", self.pop);
-        println!("{:?}", subset_array);
+        // get matches for jaccard distance calculation
+        let mut matches: f64 = 0.0;
+        if self.core != true {
+            matches = self.pop.axis_iter(Axis(1)).filter(|col| col.iter().all(|&x| x == 1)).count() as f64;
+        }
+        
+        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
+        //println!("{:?}", self.pop);
+        //println!("{:?}", subset_array);
 
         //let mut idx = 0;
         let range = 0..max_distances;
@@ -190,14 +194,14 @@ impl Population {
             let i = range1[current_index];
             let j = range2[current_index];
 
-            println!("i:\n{:?}", i);
-            println!("j:\n{:?}", j);
+            //println!("i:\n{:?}", i);
+            //println!("j:\n{:?}", j);
             
-            let row1 = subset_array.index_axis(Axis(0), i);
-            let row2 = subset_array.index_axis(Axis(0), j);
+            let row1 = subset_array.index_axis(Axis(0), i).to_owned();
+            let row2 = subset_array.index_axis(Axis(0), j).to_owned();
 
-            println!("rowi:\n{:?}", row1);
-            println!("rowj:\n{:?}", row2);
+            //println!("rowi:\n{:?}", row1);
+            //println!("rowj:\n{:?}", row2);
 
             let mut _final_distance: f64 = 0.0;
 
@@ -208,7 +212,7 @@ impl Population {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
                 _final_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
             }
-            println!("_final_distance:\n{:?}", _final_distance);
+            //println!("_final_distance:\n{:?}", _final_distance);
             _final_distance
         }).collect();
         distances
@@ -226,27 +230,27 @@ fn main() -> io::Result<()> {
         .long("pop_size")
         .help("Number of individuals in population.")
         .required(false)
-        .default_value("10"))
+        .default_value("1000"))
     .arg(Arg::new("core_size")
         .long("core_size")
         .help("Number of nucleotides in core genome.")
         .required(false)
-        .default_value("100"))
+        .default_value("1200000"))
     .arg(Arg::new("pan_size")
         .long("pan_size")
         .help("Number of genes in pangenome.")
         .required(false)
-        .default_value("100"))
+        .default_value("6000"))
     .arg(Arg::new("n_gen")
         .long("n_gen")
         .help("Number of generations to simulate.")
         .required(false)
-        .default_value("10"))
+        .default_value("100"))
     .arg(Arg::new("max_distances")
         .long("max_distances")
         .help("Maximum number of pairwise distances to calculate.")
         .required(false)
-        .default_value("100"))
+        .default_value("100000"))
     .arg(Arg::new("core_mu")
         .long("core_mu")
         .help("Maximum average pairwise core distance to achieve by end of simulation.")
@@ -281,7 +285,7 @@ fn main() -> io::Result<()> {
         .long("threads")
         .help("Number of threads.")
         .required(false)
-        .default_value("1"))
+        .default_value("6"))
     .arg(Arg::new("verbose")
         .long("verbose")
         .help("Prints generation and time to completion")
