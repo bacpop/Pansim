@@ -50,13 +50,21 @@ fn to_array2<T: Copy>(source: Vec<Array1<T>>) -> Result<Array2<T>, impl std::err
 }
 
 impl Population {
-    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool) -> Self {
+    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool, avg_gene_freq: f64, rng : &mut StdRng) -> Self {
         //let mut pop = Array2::<u8>::zeros((size, allele_count));
 
         let mut start: Array1<u8> = Array1::zeros(allele_count);
 
-        for j in 0..allele_count {
-            start[j] = rand::thread_rng().gen_range(0..max_variants);
+        if core {
+            for j in 0..allele_count {
+                start[j] = rng.gen_range(0..max_variants);
+            }
+        } else {
+            let sample_item: [(u8, f64); 2] = [(0, 1.0 - avg_gene_freq), (1, avg_gene_freq)];
+            let weighted_dist = WeightedIndex::new(sample_item.iter().map(|(_, weight)| weight)).unwrap();
+            for j in 0..allele_count {
+                start[j] = sample_item[weighted_dist.sample(rng)].0;
+            }
         }
 
         // Create a vector of Array1 filled with the same values
@@ -255,6 +263,11 @@ fn main() -> io::Result<()> {
         .help("Number of genes in pangenome.")
         .required(false)
         .default_value("6000"))
+    .arg(Arg::new("avg_gene_freq")
+        .long("avg_gene_freq")
+        .help("Average proportion of genes in pangenome present in an individual.")
+        .required(false)
+        .default_value("0.5"))
     .arg(Arg::new("n_gen")
         .long("n_gen")
         .help("Number of generations to simulate.")
@@ -311,6 +324,7 @@ fn main() -> io::Result<()> {
     let pop_size: usize = matches.value_of_t("pop_size").unwrap();
     let core_size: usize = matches.value_of_t("core_size").unwrap();
     let pan_size: usize = matches.value_of_t("pan_size").unwrap();
+    let avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
     let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
     let output = matches.value_of("output").unwrap_or("distances.tsv");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
@@ -354,6 +368,11 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
+    if (avg_gene_freq <= 0.0) || (avg_gene_freq > 1.0) {
+        println!("avg_gene_freq must be above 0.0 and below or equal to 1.0");
+        return Ok(())
+    }
+
     if n_threads < 1 {
         n_threads = 1;
     }
@@ -375,10 +394,10 @@ fn main() -> io::Result<()> {
         pan_weights[i] = speed_fast;
     }
 
-    let mut core_genome = Population::new(pop_size, core_size, 4, true); // core genome alignment
-    let mut pan_genome = Population::new(pop_size, pan_size, 2, false); // pangenome alignment
-
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
+
+    let mut core_genome = Population::new(pop_size, core_size, 4, true, avg_gene_freq, &mut rng); // core genome alignment
+    let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng); // pangenome alignment
 
     // weighted distribution samplers
     let core_weighted_dist = WeightedIndex::new(core_weights).unwrap();
