@@ -39,6 +39,7 @@ struct Population {
     pop: Array2<u8>,
     core : bool,
     core_vec : Vec<Vec<u8>>,
+    core_genes : usize
 }
 
 // stacks vector of arrays into 2D array
@@ -50,7 +51,7 @@ fn to_array2<T: Copy>(source: Vec<Array1<T>>) -> Result<Array2<T>, impl std::err
 }
 
 impl Population {
-    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool, avg_gene_freq: f64, rng : &mut StdRng) -> Self {
+    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool, avg_gene_freq: f64, rng : &mut StdRng, core_genes : usize) -> Self {
         //let mut pop = Array2::<u8>::zeros((size, allele_count));
 
         let mut start: Array1<u8> = Array1::zeros(allele_count);
@@ -84,6 +85,7 @@ impl Population {
             pop,
             core,
             core_vec,
+            core_genes,
         }
     }
 
@@ -232,7 +234,7 @@ impl Population {
                 _final_distance = distance as f64 / (column_variance.len() as f64);
             } else {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                _final_distance = 1.0 - ((intersection as f64 + matches) / (union as f64 + matches));
+                _final_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
             }
             //println!("_final_distance:\n{:?}", _final_distance);
             _final_distance
@@ -258,11 +260,16 @@ fn main() -> io::Result<()> {
         .help("Number of nucleotides in core genome.")
         .required(false)
         .default_value("1200000"))
-    .arg(Arg::new("pan_size")
-        .long("pan_size")
-        .help("Number of genes in pangenome.")
+    .arg(Arg::new("pan_genes")
+        .long("pan_genes")
+        .help("Total number of genes in pangenome (core + accessory).")
         .required(false)
         .default_value("6000"))
+    .arg(Arg::new("core_genes")
+        .long("core_genes")
+        .help("Number of core genes in pangenome.")
+        .required(false)
+        .default_value("3000"))
     .arg(Arg::new("avg_gene_freq")
         .long("avg_gene_freq")
         .help("Average proportion of genes in pangenome present in an individual.")
@@ -323,7 +330,8 @@ fn main() -> io::Result<()> {
     // Set the argument to a variable
     let pop_size: usize = matches.value_of_t("pop_size").unwrap();
     let core_size: usize = matches.value_of_t("core_size").unwrap();
-    let pan_size: usize = matches.value_of_t("pan_size").unwrap();
+    let pan_genes: usize = matches.value_of_t("pan_genes").unwrap();
+    let core_genes: usize = matches.value_of_t("core_genes").unwrap();
     let avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
     let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
     let output = matches.value_of("output").unwrap_or("distances.tsv");
@@ -343,6 +351,11 @@ fn main() -> io::Result<()> {
     //let now = Instant::now();
 
     // validate all variables
+    if core_genes > pan_genes {
+        println!("core_genes must be less than or equal to pan_size");
+        return Ok(())
+    }
+
     if (proportion_fast < 0.0) || (proportion_fast > 1.0) {
         println!("proportion_fast must be between 0.0 and 1.0");
         return Ok(())
@@ -353,8 +366,8 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
-    if (pop_size < 1) || (core_size < 1) || (pan_size < 1) || (n_gen < 1) || (max_distances < 1) {
-        println!("pop_size, core_size, pan_size, n_gen and max_distances must all be above 1");
+    if (pop_size < 1) || (core_size < 1) || (pan_genes < 1) || (n_gen < 1) || (max_distances < 1) {
+        println!("pop_size, core_size, pan_genes, n_gen and max_distances must all be above 1");
         return Ok(())
     }
 
@@ -380,6 +393,8 @@ fn main() -> io::Result<()> {
     // enable multithreading
     rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
 
+    let pan_size = pan_genes - core_genes;
+
     // calculate number of mutations per genome per generation
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
@@ -396,8 +411,8 @@ fn main() -> io::Result<()> {
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
-    let mut core_genome = Population::new(pop_size, core_size, 4, true, avg_gene_freq, &mut rng); // core genome alignment
-    let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng); // pangenome alignment
+    let mut core_genome = Population::new(pop_size, core_size, 4, true, avg_gene_freq, &mut rng, core_genes); // core genome alignment
+    let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng, core_genes); // pangenome alignment
 
     // weighted distribution samplers
     let core_weighted_dist = WeightedIndex::new(core_weights).unwrap();
