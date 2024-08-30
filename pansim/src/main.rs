@@ -62,10 +62,21 @@ impl Population {
                 start[j] = rng.gen_range(0..max_variants);
             }
         } else {
-            let sample_item: [(u8, f64); 2] = [(0, 1.0 - avg_gene_freq), (1, avg_gene_freq)];
-            let weighted_dist = WeightedIndex::new(sample_item.iter().map(|(_, weight)| weight)).unwrap();
-            for j in 0..allele_count {
-                start[j] = sample_item[weighted_dist.sample(rng)].0;
+            // let sample_item: [(u8, f64); 2] = [(0, 1.0 - avg_gene_freq), (1, avg_gene_freq)];
+            // //Create the WeightedIndex distribution using the weights
+            // let weights = sample_item.iter().map(|&(_, weight)| weight).collect::<Vec<_>>();
+            // println!("weights:\n{:?}", weights);
+            // let weighted_dist = WeightedIndex::new(&weights).unwrap();
+            // //let weighted_dist = WeightedIndex::new(sample_item.iter().map(|(_, weight)| weight)).unwrap();
+            // for j in 0..allele_count {
+            //     start[j] = sample_item[weighted_dist.sample(rng)].0;
+            // }
+
+            // set determined number of genes to 1
+            let gene_num : usize = (allele_count as f64 * avg_gene_freq).round() as usize;
+            
+            for j in 0..gene_num {
+                start[j] = 1;
             }
         }
 
@@ -76,6 +87,20 @@ impl Population {
 
         // convert vector into 2D array
         let pop = to_array2(pop_vec).unwrap();
+
+        // if !core {
+        //     //println!("pop initial:\n{:?}", pop);
+
+        //     let proportions: Vec<f64> = pop.axis_iter(Axis(0))
+        //     .map(|row| {
+        //         let sum: usize = row.iter().map(|&x| x as usize).sum();
+        //         let count = row.len();
+        //         sum as f64 / count as f64
+        //     })
+        //     .collect();
+    
+        //     println!("proportions initial:\n{:?}", proportions);
+        // }
 
         let core_vec: Vec<Vec<u8>> = vec![vec![1, 2, 3],
                                           vec![0, 2, 3],
@@ -91,11 +116,33 @@ impl Population {
         }
     }
 
+    fn calc_gene_freq (&mut self) -> f64 {
+        // Calculate the proportion of 1s for each row
+        let proportions: Vec<f64> = self.pop.axis_iter(Axis(0))
+        .map(|row| {
+            let sum: usize = row.iter().map(|&x| x as usize).sum();
+            let count = row.len();
+            sum as f64 / count as f64
+        })
+        .collect();
+
+        // Sum all the elements in the vector
+        let sum: f64 = proportions.iter().sum();
+
+        // Calculate the number of elements in the vector
+        let count = proportions.len();
+
+        // Calculate the average
+        let average: f64 = sum as f64 / count as f64;
+
+        average
+    }
+
     fn sample_indices (&mut self, rng : &mut StdRng) -> Vec<usize> {
         // Calculate the proportion of 1s for each row
         let proportions: Vec<f64> = self.pop.axis_iter(Axis(0))
         .map(|row| {
-            let sum = row.sum();
+            let sum: usize = row.iter().map(|&x| x as usize).sum();
             let count = row.len();
             sum as f64 / count as f64
         })
@@ -312,10 +359,10 @@ fn main() -> io::Result<()> {
         .long("core_genes")
         .help("Number of core genes in pangenome.")
         .required(false)
-        .default_value("3000"))
+        .default_value("2000"))
     .arg(Arg::new("avg_gene_freq")
         .long("avg_gene_freq")
-        .help("Average proportion of genes in pangenome present in an individual.")
+        .help("Average proportion of genes in pangenome present in an individual. Includes core and accessory genes")
         .required(false)
         .default_value("0.5"))
     .arg(Arg::new("n_gen")
@@ -447,7 +494,10 @@ fn main() -> io::Result<()> {
     if avg_gene_freq < 0.0 {
         avg_gene_freq = 0.0;
     }
-
+    if verbose {
+        println!("avg_gene_freq adjusted to {}", avg_gene_freq);
+    }
+    
     // calculate number of mutations per genome per generation
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
@@ -494,6 +544,11 @@ fn main() -> io::Result<()> {
             pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
         } else {
+            let final_avg_gene_freq = pan_genome.calc_gene_freq();
+            if verbose {
+                println!("final avg_gene_freq: {}", final_avg_gene_freq);
+            }
+            
             // else calculate hamming and jaccard distances
             // generate random numbers to sample indices
             let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
