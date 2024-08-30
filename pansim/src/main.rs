@@ -39,7 +39,8 @@ struct Population {
     pop: Array2<u8>,
     core : bool,
     core_vec : Vec<Vec<u8>>,
-    core_genes : usize
+    core_genes : usize,
+    avg_gene_freq : f64,
 }
 
 // stacks vector of arrays into 2D array
@@ -86,7 +87,49 @@ impl Population {
             core,
             core_vec,
             core_genes,
+            avg_gene_freq,
         }
+    }
+
+    fn sample_indices (&mut self, rng : &mut StdRng) -> Vec<usize> {
+        // Calculate the proportion of 1s for each row
+        let proportions: Vec<f64> = self.pop.axis_iter(Axis(0))
+        .map(|row| {
+            let sum = row.sum();
+            let count = row.len();
+            sum as f64 / count as f64
+        })
+        .collect();
+
+        //println!("proportions:\n{:?}", proportions);
+
+        // Calculate the differences from avg_gene_freq
+        let differences: Vec<f64> = proportions.iter()
+        .map(|&prop| (prop - self.avg_gene_freq).abs())
+        .collect();
+
+        //println!("differences:\n{:?}", differences);
+
+        // Convert differences to weights (lower difference should have higher weight)
+        let max_diff = differences.iter().cloned().fold(0./0., f64::max);
+        let weights: Vec<f64> = differences.iter()
+            .map(|&diff| max_diff - diff) // Inverting so smaller differences give larger weights
+            .collect();
+
+        //println!("max_diff:\n{:?}", max_diff);
+        //println!("weights:\n{:?}", weights);
+
+        // Create a WeightedIndex distribution based on weights
+        let dist = WeightedIndex::new(&weights).unwrap();
+
+        // Sample rows based on the distribution
+        let sampled_indices: Vec<usize> = (0..self.pop.nrows())
+        .map(|_| dist.sample(rng))
+        .collect();
+        
+        //println!("sampled_indices:\n{:?}", sampled_indices);
+
+        sampled_indices
     }
 
     fn next_generation(&mut self, sample : &Vec<usize>) {
@@ -332,7 +375,7 @@ fn main() -> io::Result<()> {
     let core_size: usize = matches.value_of_t("core_size").unwrap();
     let pan_genes: usize = matches.value_of_t("pan_genes").unwrap();
     let core_genes: usize = matches.value_of_t("core_genes").unwrap();
-    let avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
+    let mut avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
     let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
     let output = matches.value_of("output").unwrap_or("distances.tsv");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
@@ -386,6 +429,7 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
+
     if n_threads < 1 {
         n_threads = 1;
     }
@@ -394,6 +438,15 @@ fn main() -> io::Result<()> {
     rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
 
     let pan_size = pan_genes - core_genes;
+
+    // adjust avg_gene_freq by size of core genome
+    // determine proportion of accessory genome that should be present on average
+    let core_prop : f64 = core_genes as f64 / pan_genes as f64;
+    let acc_prop : f64 = 1.0 - core_prop;
+    avg_gene_freq = (avg_gene_freq - core_prop) / acc_prop;
+    if avg_gene_freq < 0.0 {
+        avg_gene_freq = 0.0;
+    }
 
     // calculate number of mutations per genome per generation
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
@@ -423,7 +476,8 @@ fn main() -> io::Result<()> {
         
         // sample new individuals if not at first generation
         if j > 0 {
-            let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
+            //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
+            let sampled_individuals = pan_genome.sample_indices(&mut rng);
             core_genome.next_generation(& sampled_individuals);
             //println!("finished copying core genome {}", j);
             pan_genome.next_generation(& sampled_individuals);
