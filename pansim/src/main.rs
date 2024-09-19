@@ -467,7 +467,7 @@ fn main() -> io::Result<()> {
     }
 
     if (pan_mu < 0.0) || (pan_mu > 1.0) {
-        println!("core_mu must be between 0.0 and 1.0");
+        println!("pan_mu must be between 0.0 and 1.0");
         return Ok(())
     }
 
