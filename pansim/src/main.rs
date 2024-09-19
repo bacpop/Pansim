@@ -448,31 +448,41 @@ fn main() -> io::Result<()> {
 
     if (proportion_fast < 0.0) || (proportion_fast > 1.0) {
         println!("proportion_fast must be between 0.0 and 1.0");
+        println!("proportion_fast: {}", proportion_fast);
         return Ok(())
     }
 
     if speed_fast < 1.0 {
         println!("speed_fast must be above 1.0");
+        println!("speed_fast: {}", speed_fast);
         return Ok(())
     }
 
     if (pop_size < 1) || (core_size < 1) || (pan_genes < 1) || (n_gen < 1) || (max_distances < 1) {
         println!("pop_size, core_size, pan_genes, n_gen and max_distances must all be above 1");
+        println!("pop_size: {}", pop_size);
+        println!("core_size: {}", core_size);
+        println!("pan_genes: {}", pan_genes);
+        println!("n_gen: {}", n_gen);
+        println!("max_distances: {}", max_distances);
         return Ok(())
     }
 
     if (core_mu < 0.0) || (core_mu > 1.0) {
         println!("core_mu must be between 0.0 and 1.0");
+        println!("core_mu: {}", core_mu);
         return Ok(())
     }
 
     if (pan_mu < 0.0) || (pan_mu > 1.0) {
         println!("pan_mu must be between 0.0 and 1.0");
+        println!("pan_mu: {}", pan_mu);
         return Ok(())
     }
 
     if (avg_gene_freq <= 0.0) || (avg_gene_freq > 1.0) {
         println!("avg_gene_freq must be above 0.0 and below or equal to 1.0");
+        println!("avg_gene_freq: {}", avg_gene_freq);
         return Ok(())
     }
 
