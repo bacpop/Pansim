@@ -35,6 +35,10 @@ fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
     (intersection, union)
 }
 
+fn average(numbers: &[f64]) -> f64 {
+    numbers.iter().sum::<f64>() as f64 / numbers.len() as f64
+}
+
 struct Population {
     pop: Array2<u8>,
     core : bool,
@@ -400,11 +404,16 @@ fn main() -> io::Result<()> {
         .help("Seed for random number generation.")
         .required(false)
         .default_value("0"))
-    .arg(Arg::new("output")
-        .long("output")
-        .help("Output file path.")
+    .arg(Arg::new("outpref")
+        .long("outpref")
+        .help("Output prefix path.")
         .required(false)
-        .default_value("distances.tsv"))
+        .default_value("distances"))
+    .arg(Arg::new("print_dist")
+        .long("print_dist")
+        .required(false)
+        .takes_value(false))
+        .help("Print per-generation average pairwise distances.")
     .arg(Arg::new("threads")
         .long("threads")
         .help("Number of threads.")
@@ -424,7 +433,7 @@ fn main() -> io::Result<()> {
     let core_genes: usize = matches.value_of_t("core_genes").unwrap();
     let mut avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
     let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
-    let output = matches.value_of("output").unwrap_or("distances.tsv");
+    let outpref = matches.value_of("outpref").unwrap_or("distances");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
     let core_mu: f64 = matches.value_of_t("core_mu").unwrap();
     let pan_mu: f64 = matches.value_of_t("pan_mu").unwrap();
@@ -433,6 +442,7 @@ fn main() -> io::Result<()> {
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
     let seed: u64 = matches.value_of_t("seed").unwrap();
+    let print_dist: bool = matches.is_present("print_dist");
 
     //let verbose = true;
 
@@ -531,6 +541,14 @@ fn main() -> io::Result<()> {
     let core_weighted_dist = WeightedIndex::new(core_weights).unwrap();
     let pan_weighted_dist = WeightedIndex::new(pan_weights).unwrap();
 
+    // hold pairwise core and accessory distances per generation
+    let mut avg_acc_dist = vec![0.0; n_gen as usize];
+    let mut avg_core_dist = vec![0.0; n_gen as usize];
+
+    // generate random numbers to sample indices
+    let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
+    let range2: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
+
     for j in 0..n_gen { // Run for n_gen generations
         //let now_gen = Instant::now();
         
@@ -553,6 +571,7 @@ fn main() -> io::Result<()> {
             //println!("finished mutating core genome {}", j);
             pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
+
         } else {
             let final_avg_gene_freq = pan_genome.calc_gene_freq();
             if verbose {
@@ -560,14 +579,13 @@ fn main() -> io::Result<()> {
             }
             
             // else calculate hamming and jaccard distances
-            // generate random numbers to sample indices
-            let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
-            let range2: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
-
             let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
             let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
 
-            let mut file = File::create(output)?;
+            let mut output_file = outpref.to_owned();
+            let extension: &str = ".tsv";
+            output_file.push_str(extension);
+            let mut file = File::create(output_file)?;
 
             // Iterate through the vectors and write each pair to the file
             for (core, acc) in core_distances.iter().zip(acc_distances.iter()) {
@@ -575,11 +593,34 @@ fn main() -> io::Result<()> {
             }
         }
 
+        // print distances
+        if print_dist {
+            let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
+            let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
+
+            avg_core_dist[j as usize] = average(&core_distances);
+            avg_acc_dist[j as usize] = average(&acc_distances);
+        }
+
         //let elapsed = now_gen.elapsed();
         if verbose {
             println!("Finished gen: {}", j + 1);    
         }
         //println!("Elapsed: {:.2?}", elapsed);
+    }
+
+    // print per generation distances
+    if print_dist {
+        let mut output_file = outpref.to_owned();
+        let extension: &str = "_per_gen.tsv";
+        output_file.push_str(extension);
+
+        let mut file = File::create(output_file)?;
+
+        // Iterate through the vectors and write each pair to the file
+        for (core, acc) in avg_core_dist.iter().zip(avg_acc_dist.iter()) {
+            writeln!(file, "{}\t{}", core, acc);
+        }
     }
     //let elapsed = now.elapsed();
     
