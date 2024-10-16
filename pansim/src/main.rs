@@ -39,6 +39,18 @@ fn average(numbers: &[f64]) -> f64 {
     numbers.iter().sum::<f64>() as f64 / numbers.len() as f64
 }
 
+fn standard_deviation(values: &[f64]) -> (f64, f64) {
+   let mean = average(values);
+
+   let sum_of_squares: f64 = values
+        .iter()
+        .map(|&x| (x - mean).powi(2))
+        .sum();
+
+   let variance = sum_of_squares / (values.len() as f64);
+   (variance.sqrt(), mean)
+}
+
 struct Population {
     pop: Array2<u8>,
     core : bool,
@@ -544,6 +556,9 @@ fn main() -> io::Result<()> {
     // hold pairwise core and accessory distances per generation
     let mut avg_acc_dist = vec![0.0; n_gen as usize];
     let mut avg_core_dist = vec![0.0; n_gen as usize];
+    let mut std_acc_dist = vec![0.0; n_gen as usize];
+    let mut std_core_dist = vec![0.0; n_gen as usize];
+
 
     // generate random numbers to sample indices
     let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
@@ -593,13 +608,24 @@ fn main() -> io::Result<()> {
             }
         }
 
-        // print distances
+        // get average distances
         if print_dist {
             let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
             let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
 
-            avg_core_dist[j as usize] = average(&core_distances);
-            avg_acc_dist[j as usize] = average(&acc_distances);
+            let mut std_core = 0.0;
+            let mut avg_core = 0.0;
+            (std_core, avg_core) = standard_deviation(&core_distances);
+            
+            let mut std_acc = 0.0;
+            let mut avg_acc = 0.0;
+            (std_acc, avg_acc) = standard_deviation(&acc_distances);
+            
+            avg_core_dist[j as usize] = avg_core;
+            avg_acc_dist[j as usize] = avg_acc;
+
+            std_core_dist[j as usize] = std_core;
+            std_acc_dist[j as usize] = std_acc;
         }
 
         //let elapsed = now_gen.elapsed();
@@ -618,10 +644,13 @@ fn main() -> io::Result<()> {
         let mut file = File::create(output_file)?;
 
         // Iterate through the vectors and write each pair to the file
-        for (core, acc) in avg_core_dist.iter().zip(avg_acc_dist.iter()) {
-            writeln!(file, "{}\t{}", core, acc);
+        for (avg_core, avg_acc, std_core, std_acc) in avg_core_dist.iter().zip(avg_acc_dist.iter()).zip(std_core_dist.iter()).zip(std_acc_dist.iter()).map(|(((w, x), y), z)| (w, x, y, z)) {
+            writeln!(file, "{}\t{}\t{}\t{}", avg_core, std_core, avg_acc, std_acc);
         }
     }
+
+    
+    
     //let elapsed = now.elapsed();
     
     // if verbose {
