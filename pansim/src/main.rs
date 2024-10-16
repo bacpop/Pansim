@@ -105,25 +105,14 @@ impl Population {
         let mut pop = to_array2(pop_vec).unwrap();
 
         if core {
+            // ensure core is same across all isolates
+            let allele_vec: Vec<u8> = (0..allele_count)
+            .map(|_| rng.gen_range(0..max_variants)).collect();
+
             pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
-                
-                let mut thread_rng = rng.clone();
-                let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                //let thread_index = rayon::current_thread_index();
-                //print!("{:?} ", thread_index);
-
-                // Jump the state of the generator for this thread
-                for _ in 0..current_index {
-                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                }
-                
-                let allele_vec: Vec<u8> = (0..allele_count)
-                .map(|_| thread_rng.gen_range(0..max_variants)).collect();
-
                 for j in 0..allele_count
                 {
                     row[j] = allele_vec[j];
-                    _update_rng.fetch_add(1, Ordering::SeqCst);
                 }
             }
             );
@@ -142,9 +131,9 @@ impl Population {
 
                 for j in 0..allele_count
                 {
-                    let sample_prop = acc_sampling_vec[j];
+                    //let sample_prop = acc_sampling_vec[j];
                     let sampled_value: f64 = thread_rng.gen();
-                    row[j] = if sampled_value < sample_prop { 1 } else { 0 };
+                    row[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
                     _update_rng.fetch_add(1, Ordering::SeqCst);
                 }
             }
