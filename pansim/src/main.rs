@@ -2,8 +2,9 @@ extern crate rand;
 extern crate statrs;
 extern crate rayon;
 extern crate ndarray;
+use rand_distr::{Beta};
 
-use rayon::prelude::*;
+use rayon::{array, prelude::*, vec};
 
 use statrs::distribution::Poisson;
 
@@ -51,6 +52,25 @@ fn standard_deviation(values: &[f64]) -> (f64, f64) {
    (variance.sqrt(), mean)
 }
 
+fn sample_beta(num_samples: usize, rng : &mut StdRng) -> Vec<f64> {
+    
+    let mut return_vec : Vec<f64> = vec![0.0; num_samples];
+
+    // U-shaped beta distribution
+    let beta_dist = Beta::new(0.5, 0.5).unwrap();
+
+    for j in 0..num_samples {
+        let mut sample = beta_dist.sample(rng);
+
+        // avoid sampling core with frequency 1.0
+        while sample == 1.0 {
+            sample = beta_dist.sample(rng);
+        }
+        return_vec[j] = sample;
+    }
+    return return_vec;
+}
+
 struct Population {
     pop: Array2<u8>,
     core : bool,
@@ -68,55 +88,75 @@ fn to_array2<T: Copy>(source: Vec<Array1<T>>) -> Result<Array2<T>, impl std::err
 }
 
 impl Population {
-    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool, avg_gene_freq: f64, rng : &mut StdRng, core_genes : usize) -> Self {
+    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool, avg_gene_freq: f64, rng : &mut StdRng, core_genes : usize, acc_sampling_vec: &Vec<f64>) -> Self {
         //let mut pop = Array2::<u8>::zeros((size, allele_count));
 
-        let mut start: Array1<u8> = Array1::zeros(allele_count);
+        // for multithreading
+        let _index = AtomicUsize::new(0);
+        let _update_rng = AtomicUsize::new(0);
 
-        if core {
-            for j in 0..allele_count {
-                start[j] = rng.gen_range(0..max_variants);
-            }
-        } else {
-            // let sample_item: [(u8, f64); 2] = [(0, 1.0 - avg_gene_freq), (1, avg_gene_freq)];
-            // //Create the WeightedIndex distribution using the weights
-            // let weights = sample_item.iter().map(|&(_, weight)| weight).collect::<Vec<_>>();
-            // println!("weights:\n{:?}", weights);
-            // let weighted_dist = WeightedIndex::new(&weights).unwrap();
-            // //let weighted_dist = WeightedIndex::new(sample_item.iter().map(|(_, weight)| weight)).unwrap();
-            // for j in 0..allele_count {
-            //     start[j] = sample_item[weighted_dist.sample(rng)].0;
-            // }
-
-            // set determined number of genes to 1
-            let gene_num : usize = (allele_count as f64 * avg_gene_freq).round() as usize;
-            
-            for j in 0..gene_num {
-                start[j] = 1;
-            }
-        }
-
-        // Create a vector of Array1 filled with the same values
+        // generate vector of vectors to hold information in
+        let start: Array1<u8> = Array1::zeros(allele_count);
         let pop_vec: Vec<Array1<u8>> = std::iter::repeat(start)
             .take(size)
             .collect();
 
         // convert vector into 2D array
-        let pop = to_array2(pop_vec).unwrap();
+        let mut pop = to_array2(pop_vec).unwrap();
 
-        // if !core {
-        //     //println!("pop initial:\n{:?}", pop);
+        if core {
+            pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
+                
+                let mut thread_rng = rng.clone();
+                let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                //let thread_index = rayon::current_thread_index();
+                //print!("{:?} ", thread_index);
 
-        //     let proportions: Vec<f64> = pop.axis_iter(Axis(0))
-        //     .map(|row| {
-        //         let sum: usize = row.iter().map(|&x| x as usize).sum();
-        //         let count = row.len();
-        //         sum as f64 / count as f64
-        //     })
-        //     .collect();
-    
-        //     println!("proportions initial:\n{:?}", proportions);
-        // }
+                // Jump the state of the generator for this thread
+                for _ in 0..current_index {
+                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                }
+                
+                let allele_vec: Vec<u8> = (0..allele_count)
+                .map(|_| thread_rng.gen_range(0..max_variants)).collect();
+
+                for j in 0..allele_count
+                {
+                    row[j] = allele_vec[j];
+                    _update_rng.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+            );
+        } else {            
+            pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
+                
+                let mut thread_rng = rng.clone();
+                let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                //let thread_index = rayon::current_thread_index();
+                //print!("{:?} ", thread_index);
+
+                // Jump the state of the generator for this thread
+                for _ in 0..current_index {
+                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                }
+
+                for j in 0..allele_count
+                {
+                    let sample_prop = acc_sampling_vec[j];
+                    let sampled_value: f64 = thread_rng.gen();
+                    row[j] = if sampled_value < sample_prop { 1 } else { 0 };
+                    _update_rng.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+            );
+        }
+
+        // update rng in place
+        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        //print!("{:?} ", rng_index);
+        for _ in 0..rng_index {
+            rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        }
 
         let core_vec: Vec<Vec<u8>> = vec![vec![1, 2, 3],
                                           vec![0, 2, 3],
@@ -546,8 +586,11 @@ fn main() -> io::Result<()> {
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
-    let mut core_genome = Population::new(pop_size, core_size, 4, true, avg_gene_freq, &mut rng, core_genes); // core genome alignment
-    let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng, core_genes); // pangenome alignment
+    // generate sampling distribution for genes in accessory genome
+    let acc_sampling_vec = sample_beta(pan_size, &mut rng);
+
+    let mut core_genome = Population::new(pop_size, core_size, 4, true, avg_gene_freq, &mut rng, core_genes, & acc_sampling_vec); // core genome alignment
+    let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng, core_genes, & acc_sampling_vec); // pangenome alignment
 
     // weighted distribution samplers
     let core_weighted_dist = WeightedIndex::new(core_weights).unwrap();
@@ -649,8 +692,6 @@ fn main() -> io::Result<()> {
         }
     }
 
-    
-    
     //let elapsed = now.elapsed();
     
     // if verbose {

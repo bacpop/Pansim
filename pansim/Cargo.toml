@@ -8,6 +8,7 @@ authors = ["Samuel T. Horsfield <shorsfield@ebi.ac.uk>"]
 
 [dependencies]
 rand = "0.8.5"
+rand_distr = "0.4"
 statrs = "0.16"
 rayon = "1.5"
 ndarray = { version = "0.15.6", features = ["rayon"] }
