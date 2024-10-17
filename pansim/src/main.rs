@@ -117,24 +117,34 @@ impl Population {
             }
             );
         } else {            
+            let mut acc_array: Array1<u8> = Array1::zeros(allele_count);
+            for j in 0..allele_count
+            {
+                //let sample_prop = acc_sampling_vec[j];
+                let sampled_value: f64 = rng.gen();
+                acc_array[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
+            }
+
             pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                 
-                let mut thread_rng = rng.clone();
-                let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                //let thread_index = rayon::current_thread_index();
-                //print!("{:?} ", thread_index);
+                // let mut thread_rng = rng.clone();
+                // let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                // //let thread_index = rayon::current_thread_index();
+                // //print!("{:?} ", thread_index);
 
-                // Jump the state of the generator for this thread
-                for _ in 0..current_index {
-                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                }
+                // // Jump the state of the generator for this thread
+                // for _ in 0..current_index {
+                //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                // }
 
+                // ensure all accessory genomes are identical at start
                 for j in 0..allele_count
                 {
                     //let sample_prop = acc_sampling_vec[j];
-                    let sampled_value: f64 = thread_rng.gen();
-                    row[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
-                    _update_rng.fetch_add(1, Ordering::SeqCst);
+                    //et sampled_value: f64 = thread_rng.gen();
+                    //row[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
+                    row[j] = acc_array[j];
+                    //_update_rng.fetch_add(1, Ordering::SeqCst);
                 }
             }
             );
@@ -183,29 +193,30 @@ impl Population {
         average
     }
 
-    fn sample_indices (&mut self, rng : &mut StdRng) -> Vec<usize> {
+    fn sample_indices (&mut self, rng : &mut StdRng, avg_gene_num: i32) -> Vec<usize> {
         // Calculate the proportion of 1s for each row
-        let proportions: Vec<f64> = self.pop.axis_iter(Axis(0))
+        let num_genes: Vec<i32> = self.pop.axis_iter(Axis(0))
         .map(|row| {
-            let sum: usize = row.iter().map(|&x| x as usize).sum();
-            let count = row.len();
-            sum as f64 / count as f64
+            let sum: i32 = row.iter().map(|&x| x as i32).sum();
+            sum
+            //let count = row.len();
+            //sum as f64 / count as f64
         })
         .collect();
 
         //println!("proportions:\n{:?}", proportions);
 
         // Calculate the differences from avg_gene_freq
-        let differences: Vec<f64> = proportions.iter()
-        .map(|&prop| (prop - self.avg_gene_freq).abs())
+        let differences: Vec<i32> = num_genes.iter()
+        .map(|&n_genes| (n_genes - avg_gene_num).abs())
         .collect();
 
         //println!("differences:\n{:?}", differences);
 
         // Convert differences to weights (lower difference should have higher weight)
-        let max_diff = differences.iter().cloned().fold(0./0., f64::max);
+        //let max_diff = differences.iter().cloned().fold(0./0., f64::max);
         let weights: Vec<f64> = differences.iter()
-            .map(|&diff| max_diff - diff) // Inverting so smaller differences give larger weights
+            .map(|&diff| 0.99_f64.powi(diff) ) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
 
         //println!("max_diff:\n{:?}", max_diff);
@@ -558,6 +569,7 @@ fn main() -> io::Result<()> {
     if verbose {
         println!("avg_gene_freq adjusted to {}", avg_gene_freq);
     }
+    let avg_gene_num: i32 = (avg_gene_freq * pan_size as f64).round() as i32;
     
     // calculate number of mutations per genome per generation
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
@@ -602,7 +614,7 @@ fn main() -> io::Result<()> {
         // sample new individuals if not at first generation
         if j > 0 {
             //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
-            let sampled_individuals = pan_genome.sample_indices(&mut rng);
+            let sampled_individuals = pan_genome.sample_indices(&mut rng, avg_gene_num);
             core_genome.next_generation(& sampled_individuals);
             //println!("finished copying core genome {}", j);
             pan_genome.next_generation(& sampled_individuals);
