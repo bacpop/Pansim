@@ -13,9 +13,11 @@ use rand::distributions::WeightedIndex;
 use rand::{Rng, SeedableRng};
 use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
+use rand::seq::SliceRandom;
 
 use ndarray::{Array1, Array2, Axis, s};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -334,6 +336,65 @@ impl Population {
 
     }
 
+    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng) {
+        // index for random number generation
+        let _index = AtomicUsize::new(0);
+        let _update_rng = AtomicUsize::new(0);
+
+        let poisson = Poisson::new(n_recombinations as f64).unwrap();
+
+        // Preallocate results vector with one entry per row
+        let mut results: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
+
+        // for each genome, determine which positions are being transferred
+        self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
+            // thread-specific random number generator
+            let mut thread_rng = rng.clone();
+            let current_index = _index.fetch_add(1, Ordering::SeqCst);
+            //let thread_index = rayon::current_thread_index();
+            //print!("{:?} ", thread_index);
+
+            // Jump the state of the generator for this thread
+            for _ in 0..current_index {
+                thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+            }
+            
+            // sample from Poisson distribution for number of sites to mutate in this isolate
+            let n_sites = poisson.sample(&mut thread_rng) as usize;
+            _update_rng.fetch_add(1, Ordering::SeqCst);
+
+            // get non-zero indices
+            let non_zero_indices: Vec<usize> = row
+                .indexed_iter()
+                .filter_map(|(idx, &val)| if val != 0 { Some(idx) } else { None })
+                .collect();
+
+            // get all sites to be recombined
+            let sampled_indices: Vec<usize> = non_zero_indices
+                .choose_multiple(&mut thread_rng, n_sites)
+                .cloned()
+                .collect();
+
+            // update the rng
+            _update_rng.fetch_add(n_sites, Ordering::SeqCst);
+
+            results[row_idx] = sampled_indices;
+
+            // TODO work how how to split the transferred between all other genomes in the population
+        }  
+        );
+        
+
+
+        // update rng in place
+        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        //print!("{:?} ", rng_index);
+        for _ in 0..rng_index {
+            rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        }
+
+    }
+
     fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
         // determine which columns are all equal, ignore from distance calculations
         let array_f64 = self.pop.mapv(|x| x as f64);
@@ -436,6 +497,11 @@ fn main() -> io::Result<()> {
         .help("Maximum average pairwise core distance to achieve by end of simulation.")
         .required(false)
         .default_value("0.05"))
+    .arg(Arg::new("recomb_rate")
+        .long("recomb_rate")
+        .help("Recombination rate as the number of recombinations that occur per SNP.")
+        .required(false)
+        .default_value("0.05"))
     .arg(Arg::new("pan_mu")
         .long("pan_mu")
         .help("Maximum average pairwise pangenome distance to achieve by end of simulation.")
@@ -484,6 +550,7 @@ fn main() -> io::Result<()> {
     let pan_genes: usize = matches.value_of_t("pan_genes").unwrap();
     let core_genes: usize = matches.value_of_t("core_genes").unwrap();
     let mut avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
+    let recomb_rate: f64 = matches.value_of_t("recomb_rate").unwrap();
     let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
     let outpref = matches.value_of("outpref").unwrap_or("distances");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
@@ -505,6 +572,12 @@ fn main() -> io::Result<()> {
     // validate all variables
     if core_genes > pan_genes {
         println!("core_genes must be less than or equal to pan_size");
+        return Ok(())
+    }
+
+    if (recomb_rate < 0.0) || (recomb_rate > 1.0) {
+        println!("recomb_rate must be between 0.0 and 1.0");
+        println!("recomb_rate: {}", recomb_rate);
         return Ok(())
     }
 
@@ -630,6 +703,11 @@ fn main() -> io::Result<()> {
             //println!("finished mutating core genome {}", j);
             pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
+
+            let n_recombinations: f64 = (n_core_mutations as f64 * recomb_rate).ceil();
+
+            // recombine populations
+
 
         } else {
             let final_avg_gene_freq = pan_genome.calc_gene_freq();
