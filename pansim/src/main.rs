@@ -357,7 +357,7 @@ impl Population {
         );
 
         // for each genome, determine which positions are being transferred
-        self.pop.axis_iter_mut(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
+        self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
             // thread-specific random number generator
             let mut thread_rng = rng.clone();
             let current_index = _index.fetch_add(1, Ordering::SeqCst);
@@ -374,8 +374,8 @@ impl Population {
             let n_targets = poisson_recip.sample(&mut thread_rng) as usize;
             _update_rng.fetch_add(2, Ordering::SeqCst);
 
-            let mut sampled_indices: Vec<usize>;
-            let mut sampled_recipients: Vec<usize>;
+            let sampled_loci: Vec<usize>;
+            let sampled_recipients: Vec<usize>;
             let mut sampled_values: Vec<u8> = vec![1; n_sites];
             // get non-zero indices
             if self.core == false {
@@ -386,14 +386,14 @@ impl Population {
                 .collect();
 
                 // get all sites to be recombined
-                sampled_indices = non_zero_indices
+                sampled_loci = non_zero_indices
                     .choose_multiple(&mut thread_rng, n_sites)
                     .cloned()
                     .collect();
 
             } else {
                 
-                sampled_indices = row
+                sampled_loci = row
                     .indexed_iter()
                     .filter_map(|(idx, &_val)| { Some(idx) })
                     .choose_multiple(&mut thread_rng, n_sites);
@@ -401,7 +401,7 @@ impl Population {
                 
                 // assign site value from row
                 for site in 0..n_sites {
-                    sampled_values[site] = row[sampled_indices[site]];
+                    sampled_values[site] = row[sampled_loci[site]];
                 }
             }
 
@@ -421,7 +421,7 @@ impl Population {
             {
                 let mutex = &loci[row_idx];
                 let mut entry = mutex.lock().unwrap();
-                *entry = sampled_indices;
+                *entry = sampled_loci;
             }
             {
                 let mutex = &values[row_idx];
@@ -436,9 +436,25 @@ impl Population {
         }  
         );
 
-        // TODO go through entries in loci, values and recipients, mutating the rows in each case
-        
+        // go through entries in loci, values and recipients, mutating the rows in each case
+        for row_idx in 0..self.pop.nrows()
+        {
+            // sample for given donor
+            let sampled_loci: Vec<usize> = loci[row_idx].lock().unwrap().to_vec();
+            let sampled_recipients: Vec<usize> = recipients[row_idx].lock().unwrap().to_vec();
+            let sampled_values: Vec<u8> = values[row_idx].lock().unwrap().to_vec();
 
+            // update recipients in place
+            for &recipient in &sampled_recipients
+            {
+                let mut row = self.pop.row_mut(recipient);
+                
+                for site_idx in 0..sampled_loci.len()
+                {
+                    row[sampled_loci[site_idx]] = sampled_values[site_idx];
+                }
+            }
+        }
 
         // update rng in place
         let rng_index: usize = _update_rng.load(Ordering::SeqCst);
@@ -758,10 +774,16 @@ fn main() -> io::Result<()> {
             pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
 
-            let n_recombinations: f64 = (n_core_mutations as f64 * recomb_rate).ceil();
+            let n_recombinations_core: f64 = (n_core_mutations as f64 * recomb_rate).ceil();
+            let n_recombinations_pan: f64 = (n_pan_mutations as f64 * recomb_rate).ceil();
+
+            // TODO decide on way to calculate n_recipients
 
             // recombine populations
-
+            if recomb_rate > 0 {
+                core_genome.recombine(n_recombinations_core, n_recipients, &mut rng);
+                pan_genome.recombine(n_recombinations_pan, n_recipients, &mut rng);
+            }
 
         } else {
             let final_avg_gene_freq = pan_genome.calc_gene_freq();
