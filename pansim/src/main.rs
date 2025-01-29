@@ -336,18 +336,28 @@ impl Population {
 
     }
 
-    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng) {
+    fn recombine(&mut self, n_recombinations : f64, n_recipients : f64, rng : &mut StdRng) {
         // index for random number generation
         let _index = AtomicUsize::new(0);
         let _update_rng = AtomicUsize::new(0);
 
-        let poisson = Poisson::new(n_recombinations as f64).unwrap();
+        let poisson_recomb = Poisson::new(n_recombinations as f64).unwrap();
+        let poisson_recip = Poisson::new(n_recipients as f64).unwrap();
 
         // Preallocate results vector with one entry per row
-        let mut results: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
+        //let mut loci: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
+        let loci: Arc<Vec<Mutex<Vec<usize>>>> = Arc::new(
+            (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
+        );
+        let values: Arc<Vec<Mutex<Vec<u8>>>> = Arc::new(
+            (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
+        );
+        let recipients: Arc<Vec<Mutex<Vec<usize>>>> = Arc::new(
+            (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
+        );
 
         // for each genome, determine which positions are being transferred
-        self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
+        self.pop.axis_iter_mut(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
             // thread-specific random number generator
             let mut thread_rng = rng.clone();
             let current_index = _index.fetch_add(1, Ordering::SeqCst);
@@ -360,29 +370,73 @@ impl Population {
             }
             
             // sample from Poisson distribution for number of sites to mutate in this isolate
-            let n_sites = poisson.sample(&mut thread_rng) as usize;
-            _update_rng.fetch_add(1, Ordering::SeqCst);
+            let n_sites = poisson_recomb.sample(&mut thread_rng) as usize;
+            let n_targets = poisson_recip.sample(&mut thread_rng) as usize;
+            _update_rng.fetch_add(2, Ordering::SeqCst);
 
+            let mut sampled_indices: Vec<usize>;
+            let mut sampled_recipients: Vec<usize>;
+            let mut sampled_values: Vec<u8> = vec![1; n_sites];
             // get non-zero indices
-            let non_zero_indices: Vec<usize> = row
+            if self.core == false {
+                // if accessory
+                let non_zero_indices: Vec<usize> = row
                 .indexed_iter()
                 .filter_map(|(idx, &val)| if val != 0 { Some(idx) } else { None })
                 .collect();
 
-            // get all sites to be recombined
-            let sampled_indices: Vec<usize> = non_zero_indices
-                .choose_multiple(&mut thread_rng, n_sites)
-                .cloned()
-                .collect();
+                // get all sites to be recombined
+                sampled_indices = non_zero_indices
+                    .choose_multiple(&mut thread_rng, n_sites)
+                    .cloned()
+                    .collect();
+
+            } else {
+                
+                sampled_indices = row
+                    .indexed_iter()
+                    .filter_map(|(idx, &_val)| { Some(idx) })
+                    .choose_multiple(&mut thread_rng, n_sites);
+
+                
+                // assign site value from row
+                for site in 0..n_sites {
+                    sampled_values[site] = row[sampled_indices[site]];
+                }
+            }
+
+            // determine recipients
+            {
+                let mut numbers: Vec<usize> = (0..self.pop.nrows()).collect();
+                numbers.shuffle(&mut thread_rng);
+
+                // Take the first `x` elements from the shuffled vector
+                sampled_recipients = numbers.into_iter().take(n_targets).collect::<Vec<usize>>();
+            }
 
             // update the rng
             _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
-            results[row_idx] = sampled_indices;
-
-            // TODO work how how to split the transferred between all other genomes in the population
+            // assign values
+            {
+                let mutex = &loci[row_idx];
+                let mut entry = mutex.lock().unwrap();
+                *entry = sampled_indices;
+            }
+            {
+                let mutex = &values[row_idx];
+                let mut entry = mutex.lock().unwrap();
+                *entry = sampled_values;
+            }
+            {
+                let mutex = &recipients[row_idx];
+                let mut entry = mutex.lock().unwrap();
+                *entry = sampled_recipients;
+            }
         }  
         );
+
+        // TODO go through entries in loci, values and recipients, mutating the rows in each case
         
 
 
