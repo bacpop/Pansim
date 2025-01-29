@@ -320,8 +320,6 @@ impl Population {
                         let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
                         _update_rng.fetch_add(1, Ordering::SeqCst);
 
-                        // TODO update rng for all times thread_rng is sampled!
-
                         // set value in place
                         row[mutant_site] = *new_allele;
                     }
@@ -444,15 +442,23 @@ impl Population {
             let sampled_recipients: Vec<usize> = recipients[row_idx].lock().unwrap().to_vec();
             let sampled_values: Vec<u8> = values[row_idx].lock().unwrap().to_vec();
 
+            //println!("index: {}", row_idx);
+            //println!("sampled_loci: {:?}", sampled_loci);
+            //println!("sampled_recipients: {:?}", sampled_recipients);
+            //println!("sampled_values: {:?}", sampled_values);
+
             // update recipients in place
             for &recipient in &sampled_recipients
             {
                 let mut row = self.pop.row_mut(recipient);
+                //println!("recip: {}", recipient);
+                //println!("pre: {:?}", row);
                 
                 for site_idx in 0..sampled_loci.len()
                 {
                     row[sampled_loci[site_idx]] = sampled_values[site_idx];
                 }
+                //println!("post: {:?}", row);
             }
         }
 
@@ -524,7 +530,7 @@ fn main() -> io::Result<()> {
 
     // Define the command-line arguments using clap
     let matches = Command::new("pansim")
-    .version("0.0.1")
+    .version("0.0.2")
     .author("Samuel Horsfield shorsfield@ebi.ac.uk")
     .about("Runs Wright-Fisher simulation, simulating neutral core genome evolution and two-speed accessory genome evolution.")
     .arg(Arg::new("pop_size")
@@ -569,7 +575,7 @@ fn main() -> io::Result<()> {
         .default_value("0.05"))
     .arg(Arg::new("recomb_rate")
         .long("recomb_rate")
-        .help("Recombination rate as the number of recombinations that occur per SNP.")
+        .help("Recombination rate, as the proportion of core/accessory sites that are transferred per generation.")
         .required(false)
         .default_value("0.05"))
     .arg(Arg::new("pan_mu")
@@ -718,6 +724,11 @@ fn main() -> io::Result<()> {
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
+    // calculate average recombinations per genome
+    let n_recombinations_core: f64 = ((core_size as f64 * recomb_rate) / pop_size as f64).round();
+    let n_recombinations_pan: f64 = ((pan_size as f64 * recomb_rate) / pop_size as f64).round();
+    let n_recipients: f64 = pop_size as f64;
+
     // set weights for sampling of sites
     let core_weights : Vec<f32> = vec![1.0; core_size];
     let mut pan_weights : Vec<f32> = vec![1.0; pan_size];
@@ -750,6 +761,7 @@ fn main() -> io::Result<()> {
     // generate random numbers to sample indices
     let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
     let range2: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
+    
 
     for j in 0..n_gen { // Run for n_gen generations
         //let now_gen = Instant::now();
@@ -757,6 +769,8 @@ fn main() -> io::Result<()> {
         // sample new individuals if not at first generation
         if j > 0 {
             //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
+            // TODO calculate pairwise distances between sample of population for each member, have linear weight on average pairwise genome distance for competition
+
             let sampled_individuals = pan_genome.sample_indices(&mut rng, avg_gene_num);
             core_genome.next_generation(& sampled_individuals);
             //println!("finished copying core genome {}", j);
@@ -774,13 +788,8 @@ fn main() -> io::Result<()> {
             pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
             //println!("finished mutating pangenome {}", j);
 
-            let n_recombinations_core: f64 = (n_core_mutations as f64 * recomb_rate).ceil();
-            let n_recombinations_pan: f64 = (n_pan_mutations as f64 * recomb_rate).ceil();
-
-            // TODO decide on way to calculate n_recipients
-
             // recombine populations
-            if recomb_rate > 0 {
+            if recomb_rate > 0.0 {
                 core_genome.recombine(n_recombinations_core, n_recipients, &mut rng);
                 pan_genome.recombine(n_recombinations_pan, n_recipients, &mut rng);
             }
