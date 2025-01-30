@@ -16,6 +16,7 @@ use crate::rand::distributions::Distribution;
 use rand::seq::SliceRandom;
 
 use ndarray::{Array1, Array2, Axis, s};
+use std::f64::MIN_POSITIVE;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -195,7 +196,7 @@ impl Population {
         average
     }
 
-    fn sample_indices (&mut self, rng : &mut StdRng, avg_gene_num: i32) -> Vec<usize> {
+    fn sample_indices (&mut self, rng : &mut StdRng, avg_gene_num: i32, avg_pairwise_dists : Vec<f64>) -> Vec<usize> {
         // Calculate the proportion of 1s for each row
         let num_genes: Vec<i32> = self.pop.axis_iter(Axis(0))
         .map(|row| {
@@ -217,9 +218,15 @@ impl Population {
 
         // Convert differences to weights (lower difference should have higher weight)
         //let max_diff = differences.iter().cloned().fold(0./0., f64::max);
-        let weights: Vec<f64> = differences.iter()
+        let mut weights: Vec<f64> = differences.iter()
             .map(|&diff| 0.99_f64.powi(diff) ) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
+
+        // update weights with average pairwise distance
+        for i in 0..weights.len()
+        {
+            weights[i] *= avg_pairwise_dists[i];
+        }
 
         //println!("max_diff:\n{:?}", max_diff);
         //println!("weights:\n{:?}", weights);
@@ -471,6 +478,71 @@ impl Population {
 
     }
 
+    fn average_distance(&mut self) -> Vec<f64> {
+        // determine which columns are all equal, ignore from distance calculations
+        let array_f64 = self.pop.mapv(|x| x as f64);
+        let column_variance = array_f64.var_axis(Axis(0), 0.0);
+
+        // Determine which column indices have variance greater than 0
+        let columns_to_iter: Vec<usize> = column_variance
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
+            .collect();
+
+        // get matches for jaccard distance calculation
+        let mut matches: f64 = 0.0;
+        if self.core != true {
+            matches = self.pop.axis_iter(Axis(1)).filter(|col| col.iter().all(|&x| x == 1)).count() as f64;
+        }
+        
+        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
+        let mut contiguous_array = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
+        contiguous_array.assign(&subset_array);
+        //println!("{:?}", self.pop);
+        //println!("{:?}", contiguous_array);
+
+        //let mut idx = 0;
+        // iterate over upper triangle
+
+        let range = 0..self.pop.nrows();
+        let distances: Vec<f64> = range.into_par_iter().map(|i| {
+
+            // get entry to compare
+            let row1 = contiguous_array.index_axis(Axis(0), i);
+            let i_distances: Vec<f64> = (0..self.pop.nrows())
+                .filter(|&j| j != i)
+                .map(|j| {
+                let mut pair_distance: f64 = 0.0;
+                
+                let row2 = contiguous_array.index_axis(Axis(0), j);
+                
+                if self.core == true {
+                    let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                    pair_distance = distance as f64 / (column_variance.len() as f64);
+                } else {
+                    let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                    pair_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
+                }
+                    
+                pair_distance
+            }).collect();
+            
+            let mut _final_distance = i_distances.iter().sum::<f64>() / i_distances.len() as f64;
+            
+            // ensure no zero distances that may cause no selection of isolates.
+            if _final_distance == 0.0
+            {
+                _final_distance = MIN_POSITIVE;
+            }
+
+            _final_distance
+        }).collect();
+
+        //println!("new distances:\n{:?}", distances);
+        distances
+        }
+
     fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
         // determine which columns are all equal, ignore from distance calculations
         let array_f64 = self.pop.mapv(|x| x as f64);
@@ -578,6 +650,11 @@ fn main() -> io::Result<()> {
         .help("Recombination rate, as the proportion of core/accessory sites that are transferred per generation.")
         .required(false)
         .default_value("0.05"))
+    .arg(Arg::new("competition")
+        .long("competition")
+        .help("Adds competition based on average pairwise genome distance.")
+        .required(false)
+        .takes_value(false))
     .arg(Arg::new("pan_mu")
         .long("pan_mu")
         .help("Maximum average pairwise pangenome distance to achieve by end of simulation.")
@@ -636,6 +713,7 @@ fn main() -> io::Result<()> {
     let speed_fast: f32 = matches.value_of_t("speed_fast").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
+    let competition = matches.is_present("competition");
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
 
@@ -759,6 +837,7 @@ fn main() -> io::Result<()> {
 
 
     // generate random numbers to sample indices
+    // TODO make it so that equivalent distances aren't sample, sample with replacement from one?
     let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
     let range2: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
     
@@ -769,9 +848,15 @@ fn main() -> io::Result<()> {
         // sample new individuals if not at first generation
         if j > 0 {
             //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
-            // TODO calculate pairwise distances between sample of population for each member, have linear weight on average pairwise genome distance for competition
-
-            let sampled_individuals = pan_genome.sample_indices(&mut rng, avg_gene_num);
+            let mut avg_pairwise_dists = vec![1.0; pop_size];
+            
+            // include competition
+            if competition == true
+            {
+                avg_pairwise_dists = pan_genome.average_distance();
+            }
+            
+            let sampled_individuals = pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists);
             core_genome.next_generation(& sampled_individuals);
             //println!("finished copying core genome {}", j);
             pan_genome.next_generation(& sampled_individuals);
