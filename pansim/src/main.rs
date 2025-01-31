@@ -74,9 +74,9 @@ fn sample_beta(num_samples: usize, rng : &mut StdRng) -> Vec<f64> {
     return return_vec;
 }
 
-fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, usize, f64) {
+fn get_variable_loci (core: bool, pop: Option<&Array2<u8>>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, usize, f64) {
     
-    let array_f64: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 2]>> = pop.mapv(|x| x as f64);
+    let array_f64: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 2]>> = Some(pop).mapv(|x| x as f64);
     let column_variance: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 1]>> = array_f64.var_axis(Axis(0), 0.0);
 
     // Determine which column indices have variance greater than 0
@@ -99,49 +99,29 @@ fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarr
     (contiguous_array, column_variance.len(), matches)
 }
 
-fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: bool, remove_self: bool,
+fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: bool,
     contiguous_array: &ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>,
     column_variance_len: usize) -> Vec<f64> {
     
     let row1: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), i);
-    let i_distances: Vec<f64>;
 
-    if remove_self == true {
-        i_distances = (0..nrows)
-        .filter(|&j| j != i)
-        .map(|j| {
-            let mut pair_distance: f64 = 0.0;
-    
-            let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
-    
-            if core == true {
-                let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                pair_distance = distance as f64 / (column_variance_len as f64);
-            } else {
-                let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
-            }
-                
-            pair_distance
-        }).collect();
-    } else {
-        i_distances = (0..nrows)
-        .map(|j| {
-            let mut pair_distance: f64 = 0.0;
-    
-            let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
-    
-            if core == true {
-                let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                pair_distance = distance as f64 / (column_variance_len as f64);
-            } else {
-                let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
-            }
-                
-            pair_distance
-        }).collect();
-    }
+    let i_distances: Vec<f64> = (0..nrows)
+    .filter(|&j| j != i)
+    .map(|j| {
+        let mut pair_distance: f64 = 0.0;
+
+        let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
+
+        if core == true {
+            let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+            pair_distance = distance as f64 / (column_variance_len as f64);
+        } else {
+            let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+            pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
+        }
+            
+        pair_distance
+    }).collect();
 
     i_distances
 }
@@ -413,13 +393,12 @@ impl Population {
 
     }
 
-    fn recombine(&mut self, n_recombinations : f64, n_recipients : f64, rng : &mut StdRng) {
+    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng, pangenome_matrix: Option<&Array2<u8>>) {
         // index for random number generation
         let _index = AtomicUsize::new(0);
         let _update_rng = AtomicUsize::new(0);
 
         let poisson_recomb = Poisson::new(n_recombinations as f64).unwrap();
-        let poisson_recip = Poisson::new(n_recipients as f64).unwrap();
 
         // Preallocate results vector with one entry per row
         //let mut loci: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
@@ -432,6 +411,16 @@ impl Population {
         let recipients: Arc<Vec<Mutex<Vec<usize>>>> = Arc::new(
             (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
         );
+
+        // get mutation matrix
+        match pangenome_matrix {
+            Some(matrix) => {
+                let (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, pangenome_matrix);
+            }
+            None => {
+                let (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, &self.pop);
+            }
+        }
 
         // for each genome, determine which positions are being transferred
         self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
@@ -448,11 +437,30 @@ impl Population {
             
             // sample from Poisson distribution for number of sites to mutate in this isolate
             let n_sites = poisson_recomb.sample(&mut thread_rng) as usize;
-            let n_targets = poisson_recip.sample(&mut thread_rng) as usize;
-            _update_rng.fetch_add(2, Ordering::SeqCst);
+            //let n_targets = poisson_recip.sample(&mut thread_rng) as usize;
+            _update_rng.fetch_add(1, Ordering::SeqCst);
+
+            // get sampling weights for each pairwise comparison
+            let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, self.core, &contiguous_array, column_variance_len);
+            let i_distances = binding
+            .iter().map(|i| {1.0 - i});
+            let sample_dist = WeightedIndex::new(i_distances).unwrap();
+
+            // Sample rows based on the distribution, adjusting as self comparison not conducted
+            let sampled_recipients: Vec<usize> = (0..n_sites)
+            .map(|_| {
+                let value: usize = sample_dist.sample(&mut thread_rng);
+                if value < row_idx {
+                    value
+                } else {
+                    value + 1
+                }
+            }).collect();
+
+            _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
             let sampled_loci: Vec<usize>;
-            let sampled_recipients: Vec<usize>;
+            //let sampled_recipients: Vec<usize>;
             let mut sampled_values: Vec<u8> = vec![1; n_sites];
             // get non-zero indices
             if self.core == false {
@@ -463,32 +471,20 @@ impl Population {
                 .collect();
 
                 // get all sites to be recombined
-                sampled_loci = non_zero_indices
-                    .choose_multiple(&mut thread_rng, n_sites)
-                    .cloned()
-                    .collect();
+                sampled_loci = (0..n_sites)
+                .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
+                .collect();
 
             } else {
                 
-                sampled_loci = row
-                    .indexed_iter()
-                    .filter_map(|(idx, &_val)| { Some(idx) })
-                    .choose_multiple(&mut thread_rng, n_sites);
+                sampled_loci = (0..n_sites)
+                .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
+                .collect();
 
-                
                 // assign site value from row
                 for site in 0..n_sites {
                     sampled_values[site] = row[sampled_loci[site]];
                 }
-            }
-
-            // determine recipients
-            {
-                let mut numbers: Vec<usize> = (0..self.pop.nrows()).collect();
-                numbers.shuffle(&mut thread_rng);
-
-                // Take the first `x` elements from the shuffled vector
-                sampled_recipients = numbers.into_iter().take(n_targets).collect::<Vec<usize>>();
             }
 
             // update the rng
@@ -513,39 +509,42 @@ impl Population {
         }  
         );
 
-        // go through entries in loci, values and recipients, mutating the rows in each case
-        for row_idx in 0..self.pop.nrows()
-        {
-            // sample for given donor
-            let sampled_loci: Vec<usize> = loci[row_idx].lock().unwrap().to_vec();
-            let sampled_recipients: Vec<usize> = recipients[row_idx].lock().unwrap().to_vec();
-            let sampled_values: Vec<u8> = values[row_idx].lock().unwrap().to_vec();
-
-            //println!("index: {}", row_idx);
-            //println!("sampled_loci: {:?}", sampled_loci);
-            //println!("sampled_recipients: {:?}", sampled_recipients);
-            //println!("sampled_values: {:?}", sampled_values);
-
-            // update recipients in place
-            for &recipient in &sampled_recipients
-            {
-                let mut row = self.pop.row_mut(recipient);
-                //println!("recip: {}", recipient);
-                //println!("pre: {:?}", row);
-                
-                for site_idx in 0..sampled_loci.len()
-                {
-                    row[sampled_loci[site_idx]] = sampled_values[site_idx];
-                }
-                //println!("post: {:?}", row);
-            }
-        }
-
         // update rng in place
         let rng_index: usize = _update_rng.load(Ordering::SeqCst);
         //print!("{:?} ", rng_index);
         for _ in 0..rng_index {
             rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        }
+
+        // go through entries in loci, values and recipients, mutating the rows in each case
+        // randomise order in which rows are moved through 
+        let mut row_indices: Vec<usize> = (0..self.pop.nrows()).collect();
+        row_indices.shuffle(rng);
+
+        for pop_idx in row_indices
+        {
+            // sample for given donor
+            let sampled_loci: Vec<usize> = loci[pop_idx].lock().unwrap().to_vec();
+            let sampled_recipients: Vec<usize> = recipients[pop_idx].lock().unwrap().to_vec();
+            let sampled_values: Vec<u8> = values[pop_idx].lock().unwrap().to_vec();
+
+            println!("index: {}", pop_idx);
+            println!("sampled_loci: {:?}", sampled_loci);
+            println!("sampled_recipients: {:?}", sampled_recipients);
+            println!("sampled_values: {:?}", sampled_values);
+
+            // update recipients in place
+            for idx in 0..sampled_loci.len()
+            {
+                let row_idx = sampled_recipients[idx];
+                let col_idx = sampled_loci[idx];
+                let value = sampled_values[idx];
+                println!("row_idx: {:?}", row_idx);
+                println!("col_idx: {:?}", col_idx);
+                println!("value: {:?}", value);
+                self.pop[[row_idx, col_idx]] = sampled_values[idx];
+                println!("pop-post: {:?}", self.pop);
+            }
         }
 
     }
@@ -556,7 +555,7 @@ impl Population {
         let range = 0..self.pop.nrows();
         let distances: Vec<f64> = range.into_par_iter().map(|i| {
 
-            let i_distances = get_distance(i, self.pop.nrows(), self.core_genes, matches, self.core, true, &contiguous_array, column_variance_len);
+            let i_distances = get_distance(i, self.pop.nrows(), self.core_genes, matches, self.core, &contiguous_array, column_variance_len);
             
             let mut _final_distance = i_distances.iter().sum::<f64>() / i_distances.len() as f64;
             
@@ -656,7 +655,7 @@ fn main() -> io::Result<()> {
         .default_value("0.05"))
     .arg(Arg::new("recomb_rate")
         .long("recomb_rate")
-        .help("Recombination rate, as the proportion of core/accessory sites that are transferred per generation.")
+        .help("Recombination rate, as the proportion of core/accessory sites that are transferred by end of simulation.")
         .required(false)
         .default_value("0.05"))
     .arg(Arg::new("competition")
@@ -812,9 +811,8 @@ fn main() -> io::Result<()> {
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
     // calculate average recombinations per genome
-    let n_recombinations_core: f64 = ((core_size as f64 * recomb_rate) / pop_size as f64).round();
-    let n_recombinations_pan: f64 = ((pan_size as f64 * recomb_rate) / pop_size as f64).round();
-    let n_recipients: f64 = pop_size as f64;
+    let n_recombinations_core: f64 = ((core_size as f64 * recomb_rate) / (n_gen as f64)).round();
+    let n_recombinations_pan: f64 = ((pan_size as f64 * recomb_rate) / (n_gen as f64)).round();
 
     // set weights for sampling of sites
     let core_weights : Vec<f32> = vec![1.0; core_size];
@@ -884,8 +882,8 @@ fn main() -> io::Result<()> {
 
             // recombine populations
             if recomb_rate > 0.0 {
-                core_genome.recombine(n_recombinations_core, n_recipients, &mut rng);
-                pan_genome.recombine(n_recombinations_pan, n_recipients, &mut rng);
+                core_genome.recombine(n_recombinations_core, &mut rng, pop_ref);
+                pan_genome.recombine(n_recombinations_pan, &mut rng);
             }
 
         } else {
