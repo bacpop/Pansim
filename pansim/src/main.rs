@@ -74,6 +74,78 @@ fn sample_beta(num_samples: usize, rng : &mut StdRng) -> Vec<f64> {
     return return_vec;
 }
 
+fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, usize, f64) {
+    
+    let array_f64: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 2]>> = pop.mapv(|x| x as f64);
+    let column_variance: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 1]>> = array_f64.var_axis(Axis(0), 0.0);
+
+    // Determine which column indices have variance greater than 0
+    let columns_to_iter: Vec<usize> = column_variance
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
+        .collect();
+
+    // get matches for jaccard distance calculation
+    let mut matches: f64 = 0.0;
+    if core != true {
+        matches = pop.axis_iter(Axis(1)).filter(|col| col.iter().all(|&x| x == 1)).count() as f64;
+    }
+    
+    let subset_array: Array2<u8> = pop.select(Axis(1), &columns_to_iter);
+    let mut contiguous_array: ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>> = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
+    contiguous_array.assign(&subset_array);
+
+    (contiguous_array, column_variance.len(), matches)
+}
+
+fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: bool, remove_self: bool,
+    contiguous_array: &ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>,
+    column_variance_len: usize) -> Vec<f64> {
+    
+    let row1: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), i);
+    let i_distances: Vec<f64>;
+
+    if remove_self == true {
+        i_distances = (0..nrows)
+        .filter(|&j| j != i)
+        .map(|j| {
+            let mut pair_distance: f64 = 0.0;
+    
+            let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
+    
+            if core == true {
+                let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                pair_distance = distance as f64 / (column_variance_len as f64);
+            } else {
+                let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
+            }
+                
+            pair_distance
+        }).collect();
+    } else {
+        i_distances = (0..nrows)
+        .map(|j| {
+            let mut pair_distance: f64 = 0.0;
+    
+            let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
+    
+            if core == true {
+                let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                pair_distance = distance as f64 / (column_variance_len as f64);
+            } else {
+                let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
+            }
+                
+            pair_distance
+        }).collect();
+    }
+
+    i_distances
+}
+
 struct Population {
     pop: Array2<u8>,
     core : bool,
@@ -479,54 +551,12 @@ impl Population {
     }
 
     fn average_distance(&mut self) -> Vec<f64> {
-        // determine which columns are all equal, ignore from distance calculations
-        let array_f64 = self.pop.mapv(|x| x as f64);
-        let column_variance = array_f64.var_axis(Axis(0), 0.0);
-
-        // Determine which column indices have variance greater than 0
-        let columns_to_iter: Vec<usize> = column_variance
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
-            .collect();
-
-        // get matches for jaccard distance calculation
-        let mut matches: f64 = 0.0;
-        if self.core != true {
-            matches = self.pop.axis_iter(Axis(1)).filter(|col| col.iter().all(|&x| x == 1)).count() as f64;
-        }
+        let (contiguous_array, column_variance_len, matches) =  get_variable_loci(self.core, &self.pop);
         
-        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
-        let mut contiguous_array = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
-        contiguous_array.assign(&subset_array);
-        //println!("{:?}", self.pop);
-        //println!("{:?}", contiguous_array);
-
-        //let mut idx = 0;
-        // iterate over upper triangle
-
         let range = 0..self.pop.nrows();
         let distances: Vec<f64> = range.into_par_iter().map(|i| {
 
-            // get entry to compare
-            let row1 = contiguous_array.index_axis(Axis(0), i);
-            let i_distances: Vec<f64> = (0..self.pop.nrows())
-                .filter(|&j| j != i)
-                .map(|j| {
-                let mut pair_distance: f64 = 0.0;
-                
-                let row2 = contiguous_array.index_axis(Axis(0), j);
-                
-                if self.core == true {
-                    let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                    pair_distance = distance as f64 / (column_variance.len() as f64);
-                } else {
-                    let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                    pair_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
-                }
-                    
-                pair_distance
-            }).collect();
+            let i_distances = get_distance(i, self.pop.nrows(), self.core_genes, matches, self.core, true, &contiguous_array, column_variance_len);
             
             let mut _final_distance = i_distances.iter().sum::<f64>() / i_distances.len() as f64;
             
@@ -544,28 +574,7 @@ impl Population {
         }
 
     fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
-        // determine which columns are all equal, ignore from distance calculations
-        let array_f64 = self.pop.mapv(|x| x as f64);
-        let column_variance = array_f64.var_axis(Axis(0), 0.0);
-
-        // Determine which column indices have variance greater than 0
-        let columns_to_iter: Vec<usize> = column_variance
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
-            .collect();
-
-        // get matches for jaccard distance calculation
-        let mut matches: f64 = 0.0;
-        if self.core != true {
-            matches = self.pop.axis_iter(Axis(1)).filter(|col| col.iter().all(|&x| x == 1)).count() as f64;
-        }
-        
-        let subset_array: Array2<u8> = self.pop.select(Axis(1), &columns_to_iter);
-        let mut contiguous_array = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
-        contiguous_array.assign(&subset_array);
-        //println!("{:?}", self.pop);
-        //println!("{:?}", contiguous_array);
+        let (contiguous_array, column_variance_len, matches) =  get_variable_loci(self.core, &self.pop);
 
         //let mut idx = 0;
         let range = 0..max_distances;
@@ -586,7 +595,7 @@ impl Population {
 
             if self.core == true {
                 let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                _final_distance = distance as f64 / (column_variance.len() as f64);
+                _final_distance = distance as f64 / (column_variance_len as f64);
             } else {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
                 _final_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
