@@ -74,9 +74,9 @@ fn sample_beta(num_samples: usize, rng : &mut StdRng) -> Vec<f64> {
     return return_vec;
 }
 
-fn get_variable_loci (core: bool, pop: Option<&Array2<u8>>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, usize, f64) {
+fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, usize, f64) {
     
-    let array_f64: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 2]>> = Some(pop).mapv(|x| x as f64);
+    let array_f64: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 2]>> = pop.mapv(|x| x as f64);
     let column_variance: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 1]>> = array_f64.var_axis(Axis(0), 0.0);
 
     // Determine which column indices have variance greater than 0
@@ -412,18 +412,25 @@ impl Population {
             (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
         );
 
+        let contiguous_array:ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>;
+        let column_variance_len: usize;
+        let matches:f64; 
+
         // get mutation matrix
         match pangenome_matrix {
             Some(matrix) => {
-                let (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, pangenome_matrix);
+                (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, matrix);
             }
             None => {
-                let (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, &self.pop);
+                (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, &self.pop);
             }
         }
 
         // for each genome, determine which positions are being transferred
         self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
+            use std::time::Instant;
+            let now = Instant::now();
+            
             // thread-specific random number generator
             let mut thread_rng = rng.clone();
             let current_index = _index.fetch_add(1, Ordering::SeqCst);
@@ -441,10 +448,17 @@ impl Population {
             _update_rng.fetch_add(1, Ordering::SeqCst);
 
             // get sampling weights for each pairwise comparison
-            let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, self.core, &contiguous_array, column_variance_len);
+            let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, column_variance_len);
+            let mut elapsed = now.elapsed();
+    
+            println!("finished distances: {}, {:.2?}", row_idx, elapsed);
+            //let binding = vec![0.1; self.pop.nrows()];
             let i_distances = binding
             .iter().map(|i| {1.0 - i});
             let sample_dist = WeightedIndex::new(i_distances).unwrap();
+
+            elapsed = now.elapsed();
+            println!("finished sampling dist: {}, {:.2?}", row_idx, elapsed);
 
             // Sample rows based on the distribution, adjusting as self comparison not conducted
             let sampled_recipients: Vec<usize> = (0..n_sites)
@@ -457,10 +471,14 @@ impl Population {
                 }
             }).collect();
 
+            elapsed = now.elapsed();
+            println!("finished sampling total: {}, {:.2?}", row_idx, elapsed);
+
+            //let sampled_recipients: Vec<usize> = vec![1, 7, 20, 705, 256];
+
             _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
             let sampled_loci: Vec<usize>;
-            //let sampled_recipients: Vec<usize>;
             let mut sampled_values: Vec<u8> = vec![1; n_sites];
             // get non-zero indices
             if self.core == false {
@@ -470,22 +488,30 @@ impl Population {
                 .filter_map(|(idx, &val)| if val != 0 { Some(idx) } else { None })
                 .collect();
 
-                // get all sites to be recombined
-                sampled_loci = (0..n_sites)
-                .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
-                .collect();
+                // // get all sites to be recombined
+                // sampled_loci = (0..n_sites)
+                // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
+                // .collect();
+                
+                let sampled_loci_tmp: Vec<usize> = (0..n_sites).map(|_| thread_rng.gen_range(0..non_zero_indices.len())).collect();
+
+                sampled_loci = sampled_loci_tmp.into_iter().map(|x| non_zero_indices[x]).collect();
 
             } else {
                 
-                sampled_loci = (0..n_sites)
-                .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
-                .collect();
+                // sampled_loci = (0..n_sites)
+                // .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
+                // .collect();
+                sampled_loci = (0..n_sites).map(|_| thread_rng.gen_range(0..self.pop.ncols())).collect();
 
                 // assign site value from row
                 for site in 0..n_sites {
                     sampled_values[site] = row[sampled_loci[site]];
                 }
             }
+
+            elapsed = now.elapsed();
+            println!("finished getting sites total: {}, {:.2?}", row_idx, elapsed);
 
             // update the rng
             _update_rng.fetch_add(n_sites, Ordering::SeqCst);
@@ -506,6 +532,9 @@ impl Population {
                 let mut entry = mutex.lock().unwrap();
                 *entry = sampled_recipients;
             }
+
+            elapsed = now.elapsed();
+            println!("finished entering data: {}, {:.2?}", row_idx, elapsed);
         }  
         );
 
@@ -882,8 +911,8 @@ fn main() -> io::Result<()> {
 
             // recombine populations
             if recomb_rate > 0.0 {
-                core_genome.recombine(n_recombinations_core, &mut rng, pop_ref);
-                pan_genome.recombine(n_recombinations_pan, &mut rng);
+                core_genome.recombine(n_recombinations_core, &mut rng, Some(&pan_genome.pop));
+                pan_genome.recombine(n_recombinations_pan, &mut rng, None);
             }
 
         } else {
