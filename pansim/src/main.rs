@@ -689,7 +689,7 @@ fn main() -> io::Result<()> {
         .default_value("0.05"))
     .arg(Arg::new("recomb_rate")
         .long("recomb_rate")
-        .help("Recombination rate, as the proportion of core/accessory sites that are transferred by end of simulation.")
+        .help("Recombination rate, as the proportion of core/accessory sites that are transferred per genome per generation.")
         .required(false)
         .default_value("0.05"))
     .arg(Arg::new("competition")
@@ -771,8 +771,8 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
-    if (recomb_rate < 0.0) || (recomb_rate > 1.0) {
-        println!("recomb_rate must be between 0.0 and 1.0");
+    if (recomb_rate < 0.0) {
+        println!("recomb_rate must be above 0.0");
         println!("recomb_rate: {}", recomb_rate);
         return Ok(())
     }
@@ -840,13 +840,13 @@ fn main() -> io::Result<()> {
     }
     let avg_gene_num: i32 = (avg_gene_freq * pan_size as f64).round() as i32;
     
-    // calculate number of mutations per genome per generation
+    // calculate number of mutations per genome per generation, should this be whole pangenome or just accessory genes?
     let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
     // calculate average recombinations per genome
-    let n_recombinations_core: f64 = ((core_size as f64 * recomb_rate) / (n_gen as f64)).round();
-    let n_recombinations_pan: f64 = ((pan_size as f64 * recomb_rate) / (n_gen as f64)).round();
+    let n_recombinations_core: f64 = ((core_size as f64 * recomb_rate)).round();
+    let n_recombinations_pan: f64 = ((pan_size as f64 * recomb_rate)).round();
 
     // set weights for sampling of sites
     let core_weights : Vec<f32> = vec![1.0; core_size];
