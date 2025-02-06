@@ -1,8 +1,8 @@
 library(ggplot2)
 
 #plot pairwise distances
-filname <- "gridsearch/recomb_0.8_competition_true.tsv"
-df <- read.csv(filname, sep = "\t", header = FALSE)
+filename <- "pan_mu_0.35_prop_1.0_recomb_0.0_competition_false"
+df <- read.csv(paste("gridsearch/original_run/", filename, ".tsv", sep = ""), sep = "\t", header = FALSE)
 colnames(df) <- c("Core", "Accessory")
 
 p <- ggplot(df, aes(x = Core, y = Accessory)) + geom_point(alpha=0.2, colour="#0c589c") +
@@ -11,7 +11,7 @@ p <- ggplot(df, aes(x = Core, y = Accessory)) + geom_point(alpha=0.2, colour="#0
   theme(axis.title = element_text(size=20), axis.text = element_text(size=18))
 p
 
-ggsave("recomb_0.8_competition_true.png")
+ggsave(paste("ngen100_npop1000_", filneame, ".png", sep = ""))
 
 # plot change in average pairwise distance
 df <- read.csv("pansim/default_same_start_ngen_500_popsize_2000_per_gen.tsv", sep = "\t", header = FALSE)
