@@ -428,8 +428,8 @@ impl Population {
 
         // for each genome, determine which positions are being transferred
         self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
-            use std::time::Instant;
-            let now = Instant::now();
+            //use std::time::Instant;
+            //let now = Instant::now();
             
             // thread-specific random number generator
             let mut thread_rng = rng.clone();
@@ -449,16 +449,16 @@ impl Population {
 
             // get sampling weights for each pairwise comparison
             let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, column_variance_len);
-            let mut elapsed = now.elapsed();
+            //let mut elapsed = now.elapsed();
     
-            println!("finished distances: {}, {:.2?}", row_idx, elapsed);
+            //println!("finished distances: {}, {:.2?}", row_idx, elapsed);
             //let binding = vec![0.1; self.pop.nrows()];
             let i_distances = binding
             .iter().map(|i| {1.0 - i});
             let sample_dist = WeightedIndex::new(i_distances).unwrap();
 
-            elapsed = now.elapsed();
-            println!("finished sampling dist: {}, {:.2?}", row_idx, elapsed);
+            //elapsed = now.elapsed();
+            //println!("finished sampling dist: {}, {:.2?}", row_idx, elapsed);
 
             // Sample rows based on the distribution, adjusting as self comparison not conducted
             let sampled_recipients: Vec<usize> = (0..n_sites)
@@ -471,8 +471,8 @@ impl Population {
                 }
             }).collect();
 
-            elapsed = now.elapsed();
-            println!("finished sampling total: {}, {:.2?}", row_idx, elapsed);
+            //elapsed = now.elapsed();
+            //println!("finished sampling total: {}, {:.2?}", row_idx, elapsed);
 
             //let sampled_recipients: Vec<usize> = vec![1, 7, 20, 705, 256];
 
@@ -510,8 +510,8 @@ impl Population {
                 }
             }
 
-            elapsed = now.elapsed();
-            println!("finished getting sites total: {}, {:.2?}", row_idx, elapsed);
+            //elapsed = now.elapsed();
+            //println!("finished getting sites total: {}, {:.2?}", row_idx, elapsed);
 
             // update the rng
             _update_rng.fetch_add(n_sites, Ordering::SeqCst);
@@ -533,8 +533,8 @@ impl Population {
                 *entry = sampled_recipients;
             }
 
-            elapsed = now.elapsed();
-            println!("finished entering data: {}, {:.2?}", row_idx, elapsed);
+            //elapsed = now.elapsed();
+            //println!("finished entering data: {}, {:.2?}", row_idx, elapsed);
         }  
         );
 
@@ -557,10 +557,10 @@ impl Population {
             let sampled_recipients: Vec<usize> = recipients[pop_idx].lock().unwrap().to_vec();
             let sampled_values: Vec<u8> = values[pop_idx].lock().unwrap().to_vec();
 
-            println!("index: {}", pop_idx);
-            println!("sampled_loci: {:?}", sampled_loci);
-            println!("sampled_recipients: {:?}", sampled_recipients);
-            println!("sampled_values: {:?}", sampled_values);
+            // println!("index: {}", pop_idx);
+            // println!("sampled_loci: {:?}", sampled_loci);
+            // println!("sampled_recipients: {:?}", sampled_recipients);
+            // println!("sampled_values: {:?}", sampled_values);
 
             // update recipients in place
             for idx in 0..sampled_loci.len()
@@ -568,11 +568,11 @@ impl Population {
                 let row_idx = sampled_recipients[idx];
                 let col_idx = sampled_loci[idx];
                 let value = sampled_values[idx];
-                println!("row_idx: {:?}", row_idx);
-                println!("col_idx: {:?}", col_idx);
-                println!("value: {:?}", value);
+                // println!("row_idx: {:?}", row_idx);
+                // println!("col_idx: {:?}", col_idx);
+                // println!("value: {:?}", value);
                 self.pop[[row_idx, col_idx]] = sampled_values[idx];
-                println!("pop-post: {:?}", self.pop);
+                // println!("pop-post: {:?}", self.pop);
             }
         }
 
