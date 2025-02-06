@@ -557,22 +557,27 @@ impl Population {
             let sampled_recipients: Vec<usize> = recipients[pop_idx].lock().unwrap().to_vec();
             let sampled_values: Vec<u8> = values[pop_idx].lock().unwrap().to_vec();
 
-            // println!("index: {}", pop_idx);
-            // println!("sampled_loci: {:?}", sampled_loci);
-            // println!("sampled_recipients: {:?}", sampled_recipients);
-            // println!("sampled_values: {:?}", sampled_values);
+            //println!("index: {}", pop_idx);
+            //println!("sampled_loci: {:?}", sampled_loci);
+            //println!("sampled_recipients: {:?}", sampled_recipients);
+            //println!("sampled_values: {:?}", sampled_values);
 
             // update recipients in place
             for idx in 0..sampled_loci.len()
             {
                 let row_idx = sampled_recipients[idx];
                 let col_idx = sampled_loci[idx];
-                let value = sampled_values[idx];
-                // println!("row_idx: {:?}", row_idx);
-                // println!("col_idx: {:?}", col_idx);
-                // println!("value: {:?}", value);
+                //let value = sampled_values[idx];
+                //println!("row_idx: {:?}", row_idx);
+                //println!("col_idx: {:?}", col_idx);
+                //println!("value: {:?}", value);
+                //println!("pop-pre: {:?}", self.pop);
+                // if self.pop[[row_idx, col_idx]] != sampled_values[idx] 
+                // {
+                //     println!("Value mismatch! {} -> {}", self.pop[[row_idx, col_idx]], sampled_values[idx] );
+                // }
                 self.pop[[row_idx, col_idx]] = sampled_values[idx];
-                // println!("pop-post: {:?}", self.pop);
+                //println!("pop-post: {:?}", self.pop);
             }
         }
 
