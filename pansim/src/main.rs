@@ -14,6 +14,7 @@ use rand::{Rng, SeedableRng};
 use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
 use rand::seq::SliceRandom;
+use rand::RngCore;
 
 use ndarray::{Array1, Array2, Axis, s};
 use ndarray::Zip;
@@ -75,17 +76,30 @@ fn sample_beta(num_samples: usize, rng : &mut StdRng) -> Vec<f64> {
     return return_vec;
 }
 
-fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, usize, f64) {
-    
-    let array_f64: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 2]>> = pop.mapv(|x| x as f64);
-    let column_variance: ndarray::ArrayBase<ndarray::OwnedRepr<f64>, ndarray::Dim<[usize; 1]>> = array_f64.var_axis(Axis(0), 0.0);
+fn non_constant_columns(array: &Array2<u8>) -> Vec<usize> {
+    (0..array.ncols())
+        .filter(|&col| {
+            let mut seen = [false; 256]; // Track encountered values
+            let mut unique_count = 0;
 
+            for &value in array.column(col).iter() {
+                if !seen[value as usize] {
+                    seen[value as usize] = true;
+                    unique_count += 1;
+                    if unique_count > 1 {
+                        return true; // Early exit if more than one unique value
+                    }
+                }
+            }
+            false
+        })
+        .collect()
+}
+
+fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, f64) {
+    
     // Determine which column indices have variance greater than 0
-    let columns_to_iter: Vec<usize> = column_variance
-        .iter()
-        .enumerate()
-        .filter_map(|(i, &variance)| if variance > 0.0 { Some(i) } else { None })
-        .collect();
+    let columns_to_iter: Vec<usize> = non_constant_columns(&pop);
 
     // get matches for jaccard distance calculation
     let mut matches: f64 = 0.0;
@@ -97,12 +111,12 @@ fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarr
     let mut contiguous_array: ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>> = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
     contiguous_array.assign(&subset_array);
 
-    (contiguous_array, column_variance.len(), matches)
+    (contiguous_array, matches)
 }
 
 fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: bool,
     contiguous_array: &ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>,
-    column_variance_len: usize) -> Vec<f64> {
+    ncols: usize) -> Vec<f64> {
     
     let row1: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), i);
 
@@ -115,7 +129,7 @@ fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: 
 
         if core == true {
             let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-            pair_distance = distance as f64 / (column_variance_len as f64);
+            pair_distance = distance as f64 / (ncols as f64);
         } else {
             let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
             pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
@@ -322,15 +336,15 @@ impl Population {
             // generate Poisson sampler
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                 // thread-specific random number generator
-                let mut thread_rng = rng.clone();
-                let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                let mut thread_rng = rand::thread_rng();
+                //let current_index = _index.fetch_add(1, Ordering::SeqCst);
                 //let thread_index = rayon::current_thread_index();
                 //print!("{:?} ", thread_index);
 
                 // Jump the state of the generator for this thread
-                for _ in 0..current_index {
-                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                }
+                // for _ in 0..current_index {
+                //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                // }
                 
                 // sample from Poisson distribution for number of sites to mutate in this isolate
                 let n_sites = poisson.sample(&mut thread_rng) as usize;
@@ -352,7 +366,7 @@ impl Population {
         } else {
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                     // thread-specific random number generator
-                    let mut thread_rng = rng.clone();
+                    let mut thread_rng = rand::thread_rng();
                     let current_index = _index.fetch_add(1, Ordering::SeqCst);
                     //let thread_index = rayon::current_thread_index();
                     //print!("{:?} ", thread_index);
@@ -414,16 +428,15 @@ impl Population {
         );
 
         let contiguous_array:ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>;
-        let column_variance_len: usize;
         let matches:f64; 
 
         // get mutation matrix
         match pangenome_matrix {
             Some(matrix) => {
-                (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, matrix);
+                (contiguous_array, matches) =  get_variable_loci(false, matrix);
             }
             None => {
-                (contiguous_array, column_variance_len, matches) =  get_variable_loci(false, &self.pop);
+                (contiguous_array, matches) =  get_variable_loci(false, &self.pop);
             }
         }
 
@@ -433,15 +446,10 @@ impl Population {
             //let now = Instant::now();
             
             // thread-specific random number generator
-            let mut thread_rng = rng.clone();
-            let current_index = _index.fetch_add(1, Ordering::SeqCst);
+            let mut thread_rng = rand::thread_rng();
+            //let current_index = _index.fetch_add(1, Ordering::SeqCst);
             //let thread_index = rayon::current_thread_index();
             //print!("{:?} ", thread_index);
-
-            // Jump the state of the generator for this thread
-            for _ in 0..current_index {
-                thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-            }
             
             // sample from Poisson distribution for number of sites to mutate in this isolate
             let n_sites = poisson_recomb.sample(&mut thread_rng) as usize;
@@ -449,7 +457,7 @@ impl Population {
             _update_rng.fetch_add(1, Ordering::SeqCst);
 
             // get sampling weights for each pairwise comparison
-            let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, column_variance_len);
+            let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, self.pop.ncols());
             //let mut elapsed = now.elapsed();
     
             //println!("finished distances: {}, {:.2?}", row_idx, elapsed);
@@ -493,8 +501,11 @@ impl Population {
                 // sampled_loci = (0..n_sites)
                 // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
                 // .collect();
-                
-                let sampled_loci_tmp: Vec<usize> = (0..n_sites).map(|_| thread_rng.gen_range(0..non_zero_indices.len())).collect();
+
+                let sampled_loci_tmp: Vec<usize> = thread_rng
+                    .sample_iter(rand::distributions::Uniform::new(0, non_zero_indices.len()))
+                    .take(n_sites)
+                    .collect();
 
                 sampled_loci = sampled_loci_tmp.into_iter().map(|x| non_zero_indices[x]).collect();
 
@@ -503,7 +514,10 @@ impl Population {
                 // sampled_loci = (0..n_sites)
                 // .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
                 // .collect();
-                sampled_loci = (0..n_sites).map(|_| thread_rng.gen_range(0..self.pop.ncols())).collect();
+                sampled_loci = thread_rng
+                    .sample_iter(rand::distributions::Uniform::new(0, self.pop.ncols()))
+                    .take(n_sites)
+                    .collect();
 
                 // assign site value from row
                 for site in 0..n_sites {
@@ -542,9 +556,9 @@ impl Population {
         // update rng in place
         let rng_index: usize = _update_rng.load(Ordering::SeqCst);
         //print!("{:?} ", rng_index);
-        for _ in 0..rng_index {
-            rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        }
+        // for _ in 0..rng_index {
+        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        // }
 
         // go through entries in loci, values and recipients, mutating the rows in each case
         // randomise order in which rows are moved through 
@@ -564,6 +578,7 @@ impl Population {
             //println!("sampled_values: {:?}", sampled_values);
 
             // update recipients in place
+            // TODO merge all changes to each recipient, make multithreaded
             Zip::from(&sampled_recipients)
             .and(&sampled_loci)
             .and(&sampled_values)
@@ -575,12 +590,12 @@ impl Population {
     }
 
     fn average_distance(&mut self) -> Vec<f64> {
-        let (contiguous_array, column_variance_len, matches) =  get_variable_loci(self.core, &self.pop);
+        let (contiguous_array, matches) =  get_variable_loci(self.core, &self.pop);
         
         let range = 0..self.pop.nrows();
         let distances: Vec<f64> = range.into_par_iter().map(|i| {
 
-            let i_distances = get_distance(i, self.pop.nrows(), self.core_genes, matches, self.core, &contiguous_array, column_variance_len);
+            let i_distances = get_distance(i, self.pop.nrows(), self.core_genes, matches, self.core, &contiguous_array, self.pop.ncols());
             
             let mut _final_distance = i_distances.iter().sum::<f64>() / i_distances.len() as f64;
             
@@ -598,7 +613,7 @@ impl Population {
         }
 
     fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
-        let (contiguous_array, column_variance_len, matches) =  get_variable_loci(self.core, &self.pop);
+        let (contiguous_array, matches) =  get_variable_loci(self.core, &self.pop);
 
         //let mut idx = 0;
         let range = 0..max_distances;
@@ -619,7 +634,7 @@ impl Population {
 
             if self.core == true {
                 let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-                _final_distance = distance as f64 / (column_variance_len as f64);
+                _final_distance = distance as f64 / (self.pop.ncols() as f64);
             } else {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
                 _final_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
