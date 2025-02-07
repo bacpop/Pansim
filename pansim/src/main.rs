@@ -16,6 +16,7 @@ use crate::rand::distributions::Distribution;
 use rand::seq::SliceRandom;
 
 use ndarray::{Array1, Array2, Axis, s};
+use ndarray::Zip;
 use std::f64::MIN_POSITIVE;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -563,22 +564,12 @@ impl Population {
             //println!("sampled_values: {:?}", sampled_values);
 
             // update recipients in place
-            for idx in 0..sampled_loci.len()
-            {
-                let row_idx = sampled_recipients[idx];
-                let col_idx = sampled_loci[idx];
-                //let value = sampled_values[idx];
-                //println!("row_idx: {:?}", row_idx);
-                //println!("col_idx: {:?}", col_idx);
-                //println!("value: {:?}", value);
-                //println!("pop-pre: {:?}", self.pop);
-                // if self.pop[[row_idx, col_idx]] != sampled_values[idx] 
-                // {
-                //     println!("Value mismatch! {} -> {}", self.pop[[row_idx, col_idx]], sampled_values[idx] );
-                // }
-                self.pop[[row_idx, col_idx]] = sampled_values[idx];
-                //println!("pop-post: {:?}", self.pop);
-            }
+            Zip::from(&sampled_recipients)
+            .and(&sampled_loci)
+            .and(&sampled_values)
+            .for_each(|&row_idx, &col_idx, &value| {
+                self.pop[[row_idx, col_idx]] = value;
+            });
         }
 
     }
