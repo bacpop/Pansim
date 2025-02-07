@@ -220,12 +220,12 @@ impl Population {
             );
         }
 
-        // update rng in place
-        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        //print!("{:?} ", rng_index);
-        for _ in 0..rng_index {
-            rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        }
+        // // update rng in place
+        // let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        // //print!("{:?} ", rng_index);
+        // for _ in 0..rng_index {
+        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        // }
 
         let core_vec: Vec<Vec<u8>> = vec![vec![1, 2, 3],
                                           vec![0, 2, 3],
@@ -367,14 +367,14 @@ impl Population {
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                     // thread-specific random number generator
                     let mut thread_rng = rand::thread_rng();
-                    let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                    //let current_index = _index.fetch_add(1, Ordering::SeqCst);
                     //let thread_index = rayon::current_thread_index();
                     //print!("{:?} ", thread_index);
 
-                    // Jump the state of the generator for this thread
-                    for _ in 0..current_index {
-                        thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                    }
+                    // // Jump the state of the generator for this thread
+                    // for _ in 0..current_index {
+                    //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                    // }
                     _update_rng.fetch_add(1, Ordering::SeqCst);
 
                     // sample from Poisson distribution for number of sites to mutate in this isolate
@@ -400,11 +400,11 @@ impl Population {
                 });
         }
         // update rng in place
-        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        //print!("{:?} ", rng_index);
-        for _ in 0..rng_index {
-            rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        }
+        // let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        // //print!("{:?} ", rng_index);
+        // for _ in 0..rng_index {
+        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        // }
 
     }
 
@@ -554,7 +554,7 @@ impl Population {
         );
 
         // update rng in place
-        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        //let rng_index: usize = _update_rng.load(Ordering::SeqCst);
         //print!("{:?} ", rng_index);
         // for _ in 0..rng_index {
         //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
