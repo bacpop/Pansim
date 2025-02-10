@@ -128,7 +128,7 @@ fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: 
         let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
 
         if core == true {
-            let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+            let distance = hamming_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
             pair_distance = distance as f64 / (ncols as f64);
         } else {
             let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
@@ -433,7 +433,7 @@ impl Population {
         // get mutation matrix
         match pangenome_matrix {
             Some(matrix) => {
-                (contiguous_array, matches) =  get_variable_loci(false, matrix);
+                (contiguous_array, matches) =  get_variable_loci(false, &matrix);
             }
             None => {
                 (contiguous_array, matches) =  get_variable_loci(false, &self.pop);
@@ -633,7 +633,7 @@ impl Population {
             let mut _final_distance: f64 = 0.0;
 
             if self.core == true {
-                let distance = hamming_distance(row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                let distance = hamming_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
                 _final_distance = distance as f64 / (self.pop.ncols() as f64);
             } else {
                 let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
