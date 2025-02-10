@@ -20,16 +20,20 @@ use ndarray::{Array1, Array2, Axis, s};
 use ndarray::Zip;
 use std::f64::MIN_POSITIVE;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use std::fs::File;
 use std::io::{self, Write};
 use std::usize;
 use clap::{Arg, Command};
 
-fn hamming_distance(x: &[u8], y: &[u8]) -> u64 {
-    assert_eq!(x.len(), y.len(), "Vectors must have the same length");
-    x.iter().zip(y).filter(|&(a, b)| a != b).count() as u64
+fn hamming_distance(arr1: &[u8], arr2: &[u8]) -> u32 {
+    assert!(arr1.len() == arr2.len(), "Arrays must be the same length!");
+
+    arr1.iter()
+        .zip(arr2.iter())
+        .map(|(a, b)| (a ^ b).count_ones())  // XOR each u8 and count 1s
+        .sum()
 }
 
 fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
@@ -114,31 +118,34 @@ fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarr
     (contiguous_array, matches)
 }
 
-fn get_distance (i :usize, nrows: usize, core_genes: usize, matches: f64, core: bool,
-    contiguous_array: &ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>,
-    ncols: usize) -> Vec<f64> {
-    
-    let row1: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), i);
+fn get_distance(i: usize, nrows: usize, core_genes: usize, matches: f64, core: bool,
+    contiguous_array: &ndarray::Array2<u8>,
+    ncols: usize
+) -> Vec<f64> {
+    let row1 = contiguous_array.index_axis(Axis(0), i);
+    let row1_slice = row1.as_slice().unwrap();  // Avoid multiple calls
 
-    let i_distances: Vec<f64> = (0..nrows)
-    .filter(|&j| j != i)
-    .map(|j| {
-        let mut pair_distance: f64 = 0.0;
+    (0..nrows)
+        .filter_map(|j| {
+            if j == i {
+                return None;  // Skip self-comparison
+            }
 
-        let row2: ndarray::ArrayBase<ndarray::ViewRepr<&u8>, ndarray::Dim<[usize; 1]>> = contiguous_array.index_axis(Axis(0), j);
+            let row2 = contiguous_array.index_axis(Axis(0), j);
+            let row2_slice = row2.as_slice().unwrap();  // Single call
 
-        if core == true {
-            let distance = hamming_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-            pair_distance = distance as f64 / (ncols as f64);
-        } else {
-            let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
-            pair_distance = 1.0 - ((intersection as f64 + matches + core_genes as f64) / (union as f64 + matches + core_genes as f64));
-        }
-            
-        pair_distance
-    }).collect();
+            let pair_distance = if core {
+                let distance = hamming_distance(row1_slice, row2_slice);
+                distance as f64 / (ncols as f64)
+            } else {
+                let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
+                1.0 - ((intersection as f64 + matches + core_genes as f64)
+                    / (union as f64 + matches + core_genes as f64))
+            };
 
-    i_distances
+            Some(pair_distance)  // Use `filter_map` instead of `map`
+        })
+        .collect()
 }
 
 struct Population {
@@ -417,15 +424,9 @@ impl Population {
 
         // Preallocate results vector with one entry per row
         //let mut loci: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
-        let loci: Arc<Vec<Mutex<Vec<usize>>>> = Arc::new(
-            (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
-        );
-        let values: Arc<Vec<Mutex<Vec<u8>>>> = Arc::new(
-            (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
-        );
-        let recipients: Arc<Vec<Mutex<Vec<usize>>>> = Arc::new(
-            (0..self.pop.nrows()).map(|_| Mutex::new(Vec::new())).collect(),
-        );
+        let loci = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
+        let values = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
+        let recipients = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
 
         let contiguous_array:ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>;
         let matches:f64; 
@@ -492,22 +493,23 @@ impl Population {
             // get non-zero indices
             if self.core == false {
                 // if accessory
-                let non_zero_indices: Vec<usize> = row
-                .indexed_iter()
-                .filter_map(|(idx, &val)| if val != 0 { Some(idx) } else { None })
-                .collect();
+                let mut non_zero_indices = Vec::with_capacity(row.len());
+                for (idx, &val) in row.indexed_iter() {
+                    if val != 0 {
+                        non_zero_indices.push(idx);
+                    }
+                }
 
                 // // get all sites to be recombined
                 // sampled_loci = (0..n_sites)
                 // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
                 // .collect();
 
-                let sampled_loci_tmp: Vec<usize> = thread_rng
-                    .sample_iter(rand::distributions::Uniform::new(0, non_zero_indices.len()))
-                    .take(n_sites)
-                    .collect();
-
-                sampled_loci = sampled_loci_tmp.into_iter().map(|x| non_zero_indices[x]).collect();
+                sampled_loci = thread_rng
+                .sample_iter(rand::distributions::Uniform::new(0, non_zero_indices.len()))
+                .take(n_sites)
+                .map(|x| non_zero_indices[x])
+                .collect();
 
             } else {
                 
@@ -533,18 +535,18 @@ impl Population {
 
             // assign values
             {
-                let mutex = &loci[row_idx];
-                let mut entry = mutex.lock().unwrap();
+                let mut mutex = loci.write().unwrap();  // Lock for writing
+                let entry = &mut mutex[row_idx];  // Now you can index safely
                 *entry = sampled_loci;
             }
             {
-                let mutex = &values[row_idx];
-                let mut entry = mutex.lock().unwrap();
+                let mut mutex = values.write().unwrap();  // Lock for writing
+                let entry = &mut mutex[row_idx];  // Now you can index safely
                 *entry = sampled_values;
             }
             {
-                let mutex = &recipients[row_idx];
-                let mut entry = mutex.lock().unwrap();
+                let mut mutex = recipients.write().unwrap();  // Lock for writing
+                let entry = &mut mutex[row_idx];  // Now you can index safely
                 *entry = sampled_recipients;
             }
 
@@ -568,9 +570,9 @@ impl Population {
         for pop_idx in row_indices
         {
             // sample for given donor
-            let sampled_loci: Vec<usize> = loci[pop_idx].lock().unwrap().to_vec();
-            let sampled_recipients: Vec<usize> = recipients[pop_idx].lock().unwrap().to_vec();
-            let sampled_values: Vec<u8> = values[pop_idx].lock().unwrap().to_vec();
+            let sampled_loci: Vec<usize> = loci.write().unwrap()[pop_idx].to_vec();
+            let sampled_recipients: Vec<usize> = recipients.write().unwrap()[pop_idx].to_vec();
+            let sampled_values: Vec<u8> = values.write().unwrap()[pop_idx].to_vec();
 
             //println!("index: {}", pop_idx);
             //println!("sampled_loci: {:?}", sampled_loci);
