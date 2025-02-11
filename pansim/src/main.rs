@@ -15,6 +15,7 @@ use rand::seq::IteratorRandom;
 use crate::rand::distributions::Distribution;
 use rand::seq::SliceRandom;
 use rand::RngCore;
+use rand::distributions::Uniform;
 
 use ndarray::{Array1, Array2, Axis, s};
 use ndarray::Zip;
@@ -26,15 +27,6 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::usize;
 use clap::{Arg, Command};
-
-fn hamming_distance(arr1: &[u8], arr2: &[u8]) -> u32 {
-    assert!(arr1.len() == arr2.len(), "Arrays must be the same length!");
-
-    arr1.iter()
-        .zip(arr2.iter())
-        .map(|(a, b)| (a ^ b).count_ones())  // XOR each u8 and count 1s
-        .sum()
-}
 
 fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
     assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
@@ -135,7 +127,7 @@ fn get_distance(i: usize, nrows: usize, core_genes: usize, matches: f64, core: b
             let row2_slice = row2.as_slice().unwrap();  // Single call
 
             let pair_distance = if core {
-                let distance = hamming_distance(row1_slice, row2_slice);
+                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
                 distance as f64 / (ncols as f64)
             } else {
                 let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
@@ -441,6 +433,8 @@ impl Population {
             }
         }
 
+        let dist: Uniform<usize> = Uniform::new(0, self.pop.nrows());
+
         // for each genome, determine which positions are being transferred
         self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
             //use std::time::Instant;
@@ -458,28 +452,27 @@ impl Population {
             _update_rng.fetch_add(1, Ordering::SeqCst);
 
             // get sampling weights for each pairwise comparison
-            let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, self.pop.ncols());
+            // TODO remove this, jsut have same distance for all individuals
+            //let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, self.pop.ncols());
             //let mut elapsed = now.elapsed();
     
             //println!("finished distances: {}, {:.2?}", row_idx, elapsed);
             //let binding = vec![0.1; self.pop.nrows()];
-            let i_distances = binding
-            .iter().map(|i| {1.0 - i});
-            let sample_dist = WeightedIndex::new(i_distances).unwrap();
+            //let i_distances = binding
+            //.iter().map(|i| {1.0 - i});
+            //let sample_dist = WeightedIndex::new(i_distances).unwrap();
 
             //elapsed = now.elapsed();
             //println!("finished sampling dist: {}, {:.2?}", row_idx, elapsed);
 
             // Sample rows based on the distribution, adjusting as self comparison not conducted
-            let sampled_recipients: Vec<usize> = (0..n_sites)
-            .map(|_| {
-                let value: usize = sample_dist.sample(&mut thread_rng);
-                if value < row_idx {
-                    value
-                } else {
-                    value + 1
-                }
-            }).collect();
+            let sampled_recipients: Vec<usize> = (0..n_sites).map(|_| dist.sample(&mut thread_rng)).collect();  // Preallocate memory
+            let mut sampled_loci: Vec<usize> = Vec::with_capacity(n_sites);
+
+            // for _ in 0..n_sites {
+            //     let value = sample_dist.sample(&mut thread_rng);
+            //     sampled_recipients.push(value + (value >= row_idx) as usize);
+            // }
 
             //elapsed = now.elapsed();
             //println!("finished sampling total: {}, {:.2?}", row_idx, elapsed);
@@ -488,7 +481,7 @@ impl Population {
 
             _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
-            let sampled_loci: Vec<usize>;
+            
             let mut sampled_values: Vec<u8> = vec![1; n_sites];
             // get non-zero indices
             if self.core == false {
@@ -506,10 +499,10 @@ impl Population {
                 // .collect();
 
                 sampled_loci = thread_rng
-                .sample_iter(rand::distributions::Uniform::new(0, non_zero_indices.len()))
-                .take(n_sites)
-                .map(|x| non_zero_indices[x])
-                .collect();
+                    .sample_iter(rand::distributions::Uniform::new(0, non_zero_indices.len()))
+                    .take(n_sites)
+                    .map(|x| non_zero_indices[x])
+                    .collect();
 
             } else {
                 
@@ -628,6 +621,8 @@ impl Population {
             
             let row1 = contiguous_array.index_axis(Axis(0), i);
             let row2 = contiguous_array.index_axis(Axis(0), j);
+            let row1_slice = row1.as_slice().unwrap();
+            let row2_slice = row2.as_slice().unwrap(); 
 
             //println!("rowi:\n{:?}", row1);
             //println!("rowj:\n{:?}", row2);
@@ -635,10 +630,10 @@ impl Population {
             let mut _final_distance: f64 = 0.0;
 
             if self.core == true {
-                let distance = hamming_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
                 _final_distance = distance as f64 / (self.pop.ncols() as f64);
             } else {
-                let (intersection, union) = jaccard_distance(&row1.as_slice().unwrap(), &row2.as_slice().unwrap());
+                let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
                 _final_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
             }
             //println!("_final_distance:\n{:?}", _final_distance);
@@ -853,8 +848,8 @@ fn main() -> io::Result<()> {
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
     // calculate average recombinations per genome
-    let n_recombinations_core: f64 = ((core_size as f64 * recomb_rate)).round();
-    let n_recombinations_pan: f64 = ((pan_size as f64 * recomb_rate)).round();
+    let n_recombinations_core: f64 = ((n_core_mutations as f64 * recomb_rate)).round();
+    let n_recombinations_pan: f64 = ((n_core_mutations as f64 * recomb_rate)).round();
 
     // set weights for sampling of sites
     let core_weights : Vec<f32> = vec![1.0; core_size];
