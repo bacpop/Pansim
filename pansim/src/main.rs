@@ -115,7 +115,7 @@ fn get_distance(i: usize, nrows: usize, core_genes: usize, matches: f64, core: b
     ncols: usize
 ) -> Vec<f64> {
     let row1 = contiguous_array.index_axis(Axis(0), i);
-    let row1_slice = row1.as_slice().unwrap();  // Avoid multiple calls
+    let row1_slice = row1.as_slice().unwrap().to_vec();  // Avoid multiple calls
 
     (0..nrows)
         .filter_map(|j| {
@@ -124,13 +124,13 @@ fn get_distance(i: usize, nrows: usize, core_genes: usize, matches: f64, core: b
             }
 
             let row2 = contiguous_array.index_axis(Axis(0), j);
-            let row2_slice = row2.as_slice().unwrap();  // Single call
+            let row2_slice = row2.as_slice().unwrap().to_vec();  // Single call
 
             let pair_distance = if core {
                 let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
                 distance as f64 / (ncols as f64)
             } else {
-                let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
+                let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
                 1.0 - ((intersection as f64 + matches + core_genes as f64)
                     / (union as f64 + matches + core_genes as f64))
             };
