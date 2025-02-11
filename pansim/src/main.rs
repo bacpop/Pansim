@@ -420,20 +420,21 @@ impl Population {
         let values = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
         let recipients = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
 
-        let contiguous_array:ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>;
-        let matches:f64; 
+        // let contiguous_array:ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>;
+        // let matches:f64; 
 
-        // get mutation matrix
-        match pangenome_matrix {
-            Some(matrix) => {
-                (contiguous_array, matches) =  get_variable_loci(false, &matrix);
-            }
-            None => {
-                (contiguous_array, matches) =  get_variable_loci(false, &self.pop);
-            }
-        }
+        // // get mutation matrix
+        // match pangenome_matrix {
+        //     Some(matrix) => {
+        //         (contiguous_array, matches) =  get_variable_loci(false, &matrix);
+        //     }
+        //     None => {
+        //         (contiguous_array, matches) =  get_variable_loci(false, &self.pop);
+        //     }
+        // }
 
-        let dist: Uniform<usize> = Uniform::new(0, self.pop.nrows());
+        // recipient distribution, minus one to avoid comparison with self
+        let dist: Uniform<usize> = Uniform::new(0, self.pop.nrows() - 1);
 
         // for each genome, determine which positions are being transferred
         self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
@@ -466,7 +467,7 @@ impl Population {
             //println!("finished sampling dist: {}, {:.2?}", row_idx, elapsed);
 
             // Sample rows based on the distribution, adjusting as self comparison not conducted
-            let sampled_recipients: Vec<usize> = (0..n_sites).map(|_| dist.sample(&mut thread_rng)).collect();  // Preallocate memory
+            let sampled_recipients: Vec<usize> = (0..n_sites).map(|_| dist.sample(&mut thread_rng)).map(|value| value + (value >= row_idx) as usize).collect();
             let mut sampled_loci: Vec<usize> = Vec::with_capacity(n_sites);
 
             // for _ in 0..n_sites {
