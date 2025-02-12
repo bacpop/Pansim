@@ -622,8 +622,8 @@ impl Population {
             
             let row1 = contiguous_array.index_axis(Axis(0), i);
             let row2 = contiguous_array.index_axis(Axis(0), j);
-            let row1_slice = row1.as_slice().unwrap();
-            let row2_slice = row2.as_slice().unwrap(); 
+            let row1_slice = row1.as_slice().unwrap().to_vec();
+            let row2_slice = row2.as_slice().unwrap().to_vec(); 
 
             //println!("rowi:\n{:?}", row1);
             //println!("rowj:\n{:?}", row2);
@@ -775,7 +775,7 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
-    if (recomb_rate < 0.0) {
+    if recomb_rate < 0.0 {
         println!("recomb_rate must be above 0.0");
         println!("recomb_rate: {}", recomb_rate);
         return Ok(())
