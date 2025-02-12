@@ -895,9 +895,17 @@ fn main() -> io::Result<()> {
     // generate random numbers to sample indices
     // TODO make it so that equivalent distances aren't sample, sample with replacement from one?
     let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
-    let range2: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
-    
+    let mut range2: Vec<usize> = vec![0; max_distances];
 
+    let mut i2 = 0;
+    // sample same range, ensure self-comparisons not included
+    for i1 in range1.clone() {
+        let mut entry = rng.gen_range(0..pop_size - 1);
+        if entry >= i1 {entry += 1};
+        range2[i2] = entry;
+        i2 += 1;
+    }
+    
     for j in 0..n_gen { // Run for n_gen generations
         //let now_gen = Instant::now();
         
