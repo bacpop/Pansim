@@ -335,15 +335,15 @@ impl Population {
             // generate Poisson sampler
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                 // thread-specific random number generator
-                let mut thread_rng = rand::thread_rng();
-                //let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                let mut thread_rng = rng.clone();
+                let current_index = _index.fetch_add(1, Ordering::SeqCst);
                 //let thread_index = rayon::current_thread_index();
                 //print!("{:?} ", thread_index);
 
                 // Jump the state of the generator for this thread
-                // for _ in 0..current_index {
-                //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                // }
+                for _ in 0..current_index {
+                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                }
                 
                 // sample from Poisson distribution for number of sites to mutate in this isolate
                 let n_sites = poisson.sample(&mut thread_rng) as usize;
@@ -365,19 +365,19 @@ impl Population {
         } else {
             self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
                     // thread-specific random number generator
-                    let mut thread_rng = rand::thread_rng();
-                    //let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                    let mut thread_rng = rng.clone();
+                    let current_index = _index.fetch_add(1, Ordering::SeqCst);
                     //let thread_index = rayon::current_thread_index();
                     //print!("{:?} ", thread_index);
 
-                    // // Jump the state of the generator for this thread
-                    // for _ in 0..current_index {
-                    //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                    // }
-                    _update_rng.fetch_add(1, Ordering::SeqCst);
+                    // Jump the state of the generator for this thread
+                    for _ in 0..current_index {
+                        thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+                    }
 
                     // sample from Poisson distribution for number of sites to mutate in this isolate
                     let n_sites = thread_rng.sample(poisson) as usize;
+                    _update_rng.fetch_add(1, Ordering::SeqCst);
 
                     // iterate for number of mutations required to reach mutation rate
                     for _ in 0..n_sites {
@@ -399,15 +399,15 @@ impl Population {
                 });
         }
         // update rng in place
-        // let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        // //print!("{:?} ", rng_index);
-        // for _ in 0..rng_index {
-        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        // }
+        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        //print!("{:?} ", rng_index);
+        for _ in 0..rng_index {
+            rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        }
 
     }
 
-    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng, pangenome_matrix: Option<&Array2<u8>>) {
+    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng, locus_weighted_dist: Option<&WeightedIndex<f32>>) {
         // index for random number generation
         let _index = AtomicUsize::new(0);
         let _update_rng = AtomicUsize::new(0);
@@ -442,10 +442,12 @@ impl Population {
             //let now = Instant::now();
             
             // thread-specific random number generator
-            let mut thread_rng = rand::thread_rng();
-            //let current_index = _index.fetch_add(1, Ordering::SeqCst);
-            //let thread_index = rayon::current_thread_index();
-            //print!("{:?} ", thread_index);
+            let mut thread_rng = rng.clone();
+            let current_index = _index.fetch_add(1, Ordering::SeqCst);
+            // Jump the state of the generator for this thread
+            for _ in 0..current_index {
+                thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
+            }
             
             // sample from Poisson distribution for number of sites to mutate in this isolate
             let n_sites = poisson_recomb.sample(&mut thread_rng) as usize;
@@ -510,6 +512,8 @@ impl Population {
                 // sampled_loci = (0..n_sites)
                 // .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
                 // .collect();
+
+                let locus_weighted_dist = locus_weighted_dist.unwrap();
                 sampled_loci = thread_rng
                     .sample_iter(rand::distributions::Uniform::new(0, self.pop.ncols()))
                     .take(n_sites)
@@ -550,11 +554,11 @@ impl Population {
         );
 
         // update rng in place
-        //let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        //print!("{:?} ", rng_index);
-        // for _ in 0..rng_index {
-        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        // }
+        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
+        print!("{:?} ", rng_index);
+        for _ in 0..rng_index {
+            rng.gen::<u64>(); // Discard some numbers to mimic jumping
+        }
 
         // go through entries in loci, values and recipients, mutating the rows in each case
         // randomise order in which rows are moved through 
@@ -878,8 +882,8 @@ fn main() -> io::Result<()> {
     let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng, core_genes, & acc_sampling_vec); // pangenome alignment
 
     // weighted distribution samplers
-    let core_weighted_dist = WeightedIndex::new(core_weights).unwrap();
-    let pan_weighted_dist = WeightedIndex::new(pan_weights).unwrap();
+    let core_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(core_weights).unwrap();
+    let pan_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(pan_weights).unwrap();
 
     // hold pairwise core and accessory distances per generation
     let mut avg_acc_dist = vec![0.0; n_gen as usize];
@@ -927,10 +931,10 @@ fn main() -> io::Result<()> {
 
             // recombine populations
             if HR_rate > 0.0 {
-                core_genome.recombine(n_recombinations_core, &mut rng, Some(&pan_genome.pop));
+                core_genome.recombine(n_recombinations_core, &mut rng, None);
             }
             if HGT_rate > 0.0 {
-                pan_genome.recombine(n_recombinations_pan, &mut rng, None);
+                pan_genome.recombine(n_recombinations_pan, &mut rng, Some(&pan_weighted_dist));
             }
 
         } else {
