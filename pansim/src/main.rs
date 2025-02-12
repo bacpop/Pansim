@@ -691,9 +691,14 @@ fn main() -> io::Result<()> {
         .help("Maximum average pairwise core distance to achieve by end of simulation.")
         .required(false)
         .default_value("0.05"))
-    .arg(Arg::new("recomb_rate")
+    .arg(Arg::new("HR_rate")
         .long("recomb_rate")
-        .help("Recombination rate, as the proportion of core/accessory sites that are transferred per genome per generation.")
+        .help("Homologous recombination rate, as number of core sites transferred per core genome mutation.")
+        .required(false)
+        .default_value("0.05"))
+    .arg(Arg::new("HGT_rate")
+        .long("recomb_rate")
+        .help("HGT rate, as number of accessory sites transferred per core genome mutation.")
         .required(false)
         .default_value("0.05"))
     .arg(Arg::new("competition")
@@ -749,7 +754,8 @@ fn main() -> io::Result<()> {
     let pan_genes: usize = matches.value_of_t("pan_genes").unwrap();
     let core_genes: usize = matches.value_of_t("core_genes").unwrap();
     let mut avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
-    let recomb_rate: f64 = matches.value_of_t("recomb_rate").unwrap();
+    let HR_rate: f64 = matches.value_of_t("HR_rate").unwrap();
+    let HGT_rate: f64 = matches.value_of_t("HGT_rate").unwrap();
     let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
     let outpref = matches.value_of("outpref").unwrap_or("distances");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
@@ -775,9 +781,10 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
-    if recomb_rate < 0.0 {
-        println!("recomb_rate must be above 0.0");
-        println!("recomb_rate: {}", recomb_rate);
+    if (HR_rate < 0.0 || HGT_rate < 0.0) {
+        println!("HR_rate and HGT_rate must be above 0.0");
+        println!("HR_rate: {}", HR_rate);
+        println!("HGT_rate: {}", HGT_rate);
         return Ok(())
     }
 
@@ -849,8 +856,8 @@ fn main() -> io::Result<()> {
     let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
 
     // calculate average recombinations per genome
-    let n_recombinations_core: f64 = ((n_core_mutations as f64 * recomb_rate)).round();
-    let n_recombinations_pan: f64 = ((n_core_mutations as f64 * recomb_rate)).round();
+    let n_recombinations_core: f64 = ((n_core_mutations as f64 * HR_rate)).round();
+    let n_recombinations_pan: f64 = ((n_core_mutations as f64 * HGT_rate)).round();
 
     // set weights for sampling of sites
     let core_weights : Vec<f32> = vec![1.0; core_size];
@@ -919,8 +926,10 @@ fn main() -> io::Result<()> {
             //println!("finished mutating pangenome {}", j);
 
             // recombine populations
-            if recomb_rate > 0.0 {
+            if HR_rate > 0.0 {
                 core_genome.recombine(n_recombinations_core, &mut rng, Some(&pan_genome.pop));
+            }
+            if HGT_rate > 0.0 {
                 pan_genome.recombine(n_recombinations_pan, &mut rng, None);
             }
 
