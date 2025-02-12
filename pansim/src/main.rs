@@ -407,7 +407,7 @@ impl Population {
 
     }
 
-    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng, locus_weighted_dist: Option<&WeightedIndex<f32>>) {
+    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng, locus_weights: &Vec<f32>) {
         // index for random number generation
         let _index = AtomicUsize::new(0);
         let _update_rng = AtomicUsize::new(0);
@@ -484,15 +484,14 @@ impl Population {
 
             _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
-            
             let mut sampled_values: Vec<u8> = vec![1; n_sites];
             // get non-zero indices
             if self.core == false {
-                // if accessory
-                let mut non_zero_indices = Vec::with_capacity(row.len());
+                //if accessory, set elements with no genes to 0
+                let mut non_zero_weights: Vec<f32> = locus_weights.clone();
                 for (idx, &val) in row.indexed_iter() {
-                    if val != 0 {
-                        non_zero_indices.push(idx);
+                    if val == 0 {
+                        non_zero_weights[idx] = 0.0;
                     }
                 }
 
@@ -500,11 +499,13 @@ impl Population {
                 // sampled_loci = (0..n_sites)
                 // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
                 // .collect();
+                
+                let locus_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(non_zero_weights).unwrap();
 
+                // iterate for number of mutations required to reach mutation rate, include deletions and insertions
                 sampled_loci = thread_rng
-                    .sample_iter(rand::distributions::Uniform::new(0, non_zero_indices.len()))
+                    .sample_iter(locus_weighted_dist)
                     .take(n_sites)
-                    .map(|x| non_zero_indices[x])
                     .collect();
 
             } else {
@@ -513,7 +514,6 @@ impl Population {
                 // .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
                 // .collect();
 
-                let locus_weighted_dist = locus_weighted_dist.unwrap();
                 sampled_loci = thread_rng
                     .sample_iter(rand::distributions::Uniform::new(0, self.pop.ncols()))
                     .take(n_sites)
@@ -555,7 +555,7 @@ impl Population {
 
         // update rng in place
         let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        print!("{:?} ", rng_index);
+        //print!("{:?} ", rng_index);
         for _ in 0..rng_index {
             rng.gen::<u64>(); // Discard some numbers to mimic jumping
         }
@@ -572,10 +572,10 @@ impl Population {
             let sampled_recipients: Vec<usize> = recipients.write().unwrap()[pop_idx].to_vec();
             let sampled_values: Vec<u8> = values.write().unwrap()[pop_idx].to_vec();
 
-            //println!("index: {}", pop_idx);
-            //println!("sampled_loci: {:?}", sampled_loci);
-            //println!("sampled_recipients: {:?}", sampled_recipients);
-            //println!("sampled_values: {:?}", sampled_values);
+            // println!("index: {}", pop_idx);
+            // println!("sampled_loci: {:?}", sampled_loci);
+            // println!("sampled_recipients: {:?}", sampled_recipients);
+            // println!("sampled_values: {:?}", sampled_values);
 
             // update recipients in place
             // TODO merge all changes to each recipient, make multithreaded
@@ -882,8 +882,8 @@ fn main() -> io::Result<()> {
     let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng, core_genes, & acc_sampling_vec); // pangenome alignment
 
     // weighted distribution samplers
-    let core_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(core_weights).unwrap();
-    let pan_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(pan_weights).unwrap();
+    let core_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(core_weights.clone()).unwrap();
+    let pan_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(pan_weights.clone()).unwrap();
 
     // hold pairwise core and accessory distances per generation
     let mut avg_acc_dist = vec![0.0; n_gen as usize];
@@ -931,10 +931,10 @@ fn main() -> io::Result<()> {
 
             // recombine populations
             if HR_rate > 0.0 {
-                core_genome.recombine(n_recombinations_core, &mut rng, None);
+                core_genome.recombine(n_recombinations_core, &mut rng, &core_weights);
             }
             if HGT_rate > 0.0 {
-                pan_genome.recombine(n_recombinations_pan, &mut rng, Some(&pan_weighted_dist));
+                pan_genome.recombine(n_recombinations_pan, &mut rng, &pan_weights);
             }
 
         } else {
