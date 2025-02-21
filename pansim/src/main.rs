@@ -740,8 +740,8 @@ fn main() -> io::Result<()> {
         .help("Proportion of accessory pangenome that mutates per generation in gene compartment 2. Must be >= 0.0")
         .required(false)
         .default_value("0.0001"))
-    .arg(Arg::new("prop_comp2")
-        .long("prop_comp2")
+    .arg(Arg::new("prop_genes2")
+        .long("prop_genes2")
         .help("Proportion of pangenome made up of compartment 2 genes. Must be 0.0 <= X <= 0.5")
         .required(false)
         .default_value("0.1"))
@@ -786,7 +786,7 @@ fn main() -> io::Result<()> {
     let core_mu: f64 = matches.value_of_t("core_mu").unwrap();
     let rate_genes1: f64 = matches.value_of_t("rate_genes1").unwrap();
     let rate_genes2: f64 = matches.value_of_t("rate_genes2").unwrap();
-    let prop_comp2: f64 = matches.value_of_t("prop_comp2").unwrap();
+    let prop_genes2: f64 = matches.value_of_t("prop_genes2").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
     let competition = matches.is_present("competition");
@@ -819,9 +819,9 @@ fn main() -> io::Result<()> {
         return Ok(())
     }
 
-    if prop_comp2 < 0.0 || prop_comp2 > 0.5 {
-        println!("prop_comp2 must be 0.0 <= prop_comp2 <= 0.5");
-        println!("prop_comp2: {}", prop_comp2);
+    if prop_genes2 < 0.0 || prop_genes2 > 0.5 {
+        println!("prop_genes2 must be 0.0 <= prop_genes2 <= 0.5");
+        println!("prop_genes2: {}", prop_genes2);
         return Ok(())
     }
 
@@ -886,7 +886,7 @@ fn main() -> io::Result<()> {
     let mut pan_weights : Vec<Vec<f32>> = vec![vec![0.0; pan_size]; 2];
 
     // calculate sites for fast accessory genome
-    let num_gene1_sites = (pan_size as f64 * (1.0 - prop_comp2)).round() as usize;
+    let num_gene1_sites = (pan_size as f64 * (1.0 - prop_genes2)).round() as usize;
     let n_pan_mutations_gene1 = ((pan_size as f64 * rate_genes1)).ceil() as i32;
     let mut n_pan_mutations_gene2 = ((pan_size as f64 * rate_genes2)).ceil() as i32;
 
