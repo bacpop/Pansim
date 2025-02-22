@@ -323,7 +323,7 @@ impl Population {
         self.pop = next_pop;
     }
 
-    fn mutate_alleles(&mut self, mutations_vec : &Vec<i32>, rng : &mut StdRng, weighted_dist: &Vec<WeightedIndex<f32>>) {
+    fn mutate_alleles(&mut self, mutations_vec : &Vec<f64>, rng : &mut StdRng, weighted_dist: &Vec<WeightedIndex<f32>>) {
         // index for random number generation
         let _index = AtomicUsize::new(0);
         let _update_rng = AtomicUsize::new(0);
@@ -331,12 +331,7 @@ impl Population {
         for site_idx in 0..mutations_vec.len() {
 
             let mutations = mutations_vec[site_idx];
-            let poisson = Poisson::new(mutations as f64).unwrap();
-
-            // avoid case where no mutations are allowed
-            if mutations == 0 {
-                continue;
-            }
+            let poisson = Poisson::new(mutations).unwrap();
 
             if self.core == false {
                 // generate Poisson sampler
@@ -424,7 +419,7 @@ impl Population {
             
             let n_recombinations =  recombinations_vec[site_idx];
 
-            let poisson_recomb = Poisson::new(n_recombinations as f64).unwrap();
+            let poisson_recomb = Poisson::new(n_recombinations).unwrap();
 
             // Preallocate results vector with one entry per row
             //let mut loci: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
@@ -732,14 +727,14 @@ fn main() -> io::Result<()> {
         .takes_value(false))
     .arg(Arg::new("rate_genes1")
         .long("rate_genes1")
-        .help("Proportion of accessory pangenome that mutates per generation in gene compartment 1. Must be >= 0.0")
+        .help("Average number of accessory pangenome that mutates per generation in gene compartment 1. Must be >= 0.0")
         .required(false)
-        .default_value("0.0000000001"))
+        .default_value("10.0"))
     .arg(Arg::new("rate_genes2")
         .long("rate_genes2")
-        .help("Proportion of accessory pangenome that mutates per generation in gene compartment 2. Must be >= 0.0")
+        .help("Average number of accessory pangenome that mutates per generation in gene compartment 2. Must be >= 0.0")
         .required(false)
-        .default_value("0.0001"))
+        .default_value("10.0"))
     .arg(Arg::new("prop_genes2")
         .long("prop_genes2")
         .help("Proportion of pangenome made up of compartment 2 genes. Must be 0.0 <= X <= 0.5")
@@ -813,7 +808,7 @@ fn main() -> io::Result<()> {
     }
 
     if rate_genes1 < 0.0 || rate_genes2 < 0.0 {
-        println!("rate_genes1 and rate_genes2 must be >= 0.0");
+        println!("rate_genes1 and rate_genes2 must be >= 0");
         println!("rate_genes1: {}", rate_genes1);
         println!("rate_genes2: {}", rate_genes2);
         return Ok(())
@@ -871,41 +866,45 @@ fn main() -> io::Result<()> {
     let avg_gene_num: i32 = (avg_gene_freq * pan_size as f64).round() as i32;
     
     // calculate number of mutations per genome per generation, should this be whole pangenome or just accessory genes?
-    let n_core_mutations = vec![(((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() as i32];
+    let n_core_mutations = vec![(((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() as f64];
     
 
     // calculate average recombinations per genome
     let n_recombinations_core: Vec<f64> = vec![((n_core_mutations[0] as f64 * HR_rate)).round()];
     let n_recombinations_pan_total = ((n_core_mutations[0] as f64 * HGT_rate)).round();
+    let mut n_recombinations_pan: Vec<f64> = vec![];
     let n_recombinations_pan_gene1 = n_recombinations_pan_total * (rate_genes1 / (rate_genes1 + rate_genes2));
-    let n_recombinations_pan_gene2 = n_recombinations_pan_total * (rate_genes2 / (rate_genes1 + rate_genes2));
-    let n_recombinations_pan: Vec<f64> = vec![n_recombinations_pan_gene1, n_recombinations_pan_gene2];
-
+    n_recombinations_pan.push(n_recombinations_pan_gene1);
+    
     // set weights for sampling of sites
     let core_weights : Vec<Vec<f32>> = vec![vec![1.0; core_size]; 1];
-    let mut pan_weights : Vec<Vec<f32>> = vec![vec![0.0; pan_size]; 2];
+    let mut pan_weights : Vec<Vec<f32>> = vec![];
+    let mut n_pan_mutations: Vec<f64> = vec![];
 
     // calculate sites for fast accessory genome
     let num_gene1_sites = (pan_size as f64 * (1.0 - prop_genes2)).round() as usize;
-    let n_pan_mutations_gene1 = ((pan_size as f64 * rate_genes1)).ceil() as i32;
-    let mut n_pan_mutations_gene2 = ((pan_size as f64 * rate_genes2)).ceil() as i32;
-
-    // set number of gene 1 mutations to 0 if there are no gene 2 present
-    if num_gene1_sites == pan_size {
-        n_pan_mutations_gene2 = 0;
-    }
-
-    let n_pan_mutations = vec![n_pan_mutations_gene1, n_pan_mutations_gene2];
     
     // create weights for either rate compartments
     // for gene rate 1
+    let mut pan_weights_1: Vec<f32> = vec![0.0; pan_size];
     for i in 0..num_gene1_sites {
-        pan_weights[0][i] = 1.0;
+        pan_weights_1[i] = 1.0;
     }
-    // gene rate 2
-    for i in num_gene1_sites..pan_size {
-        pan_weights[1][i] = 1.0;
-    }
+    pan_weights.push(pan_weights_1);
+    n_pan_mutations.push(rate_genes1);
+    
+    // gene 2 rates of mutation and HGT, if any genes exist, otherwise don't add
+    if num_gene1_sites < pan_size {
+        let mut pan_weights_2: Vec<f32> = vec![0.0; pan_size];
+        for i in num_gene1_sites..pan_size {
+            pan_weights_2[i] = 1.0;
+        }
+        n_pan_mutations.push(rate_genes2);
+        pan_weights.push(pan_weights_2);
+
+        let n_recombinations_pan_gene2 = n_recombinations_pan_total * (rate_genes2 / (rate_genes1 + rate_genes2));
+        n_recombinations_pan.push(n_recombinations_pan_gene2);
+    } 
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
