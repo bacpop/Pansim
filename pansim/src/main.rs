@@ -945,6 +945,8 @@ fn main() -> io::Result<()> {
 
     // calculate sites for fast accessory genome
     let num_gene1_sites = (pan_size as f64 * (1.0 - prop_genes2)).round() as usize;
+    let prop_gene1_sites: f64 = num_gene1_sites as f64 / pan_size as f64;
+    let prop_gene2_sites: f64 = 1.0 - prop_gene1_sites;
 
     // create weights for either rate compartments
     // for gene rate 1 if any exist, otherwise don't add
@@ -956,7 +958,7 @@ fn main() -> io::Result<()> {
         pan_weights.push(pan_weights_1);
         n_pan_mutations.push(rate_genes1);
         let n_recombinations_pan_gene1 =
-            n_recombinations_pan_total * (rate_genes1 / (rate_genes1 + rate_genes2));
+            n_recombinations_pan_total * prop_gene1_sites; //(rate_genes1 / (rate_genes1 + rate_genes2));
         n_recombinations_pan.push(n_recombinations_pan_gene1);
     } 
     
@@ -970,7 +972,7 @@ fn main() -> io::Result<()> {
         pan_weights.push(pan_weights_2);
 
         let n_recombinations_pan_gene2 =
-            n_recombinations_pan_total * (rate_genes2 / (rate_genes1 + rate_genes2));
+            n_recombinations_pan_total * prop_gene2_sites; //(rate_genes2 / (rate_genes1 + rate_genes2));
         n_recombinations_pan.push(n_recombinations_pan_gene2);
     }
 
