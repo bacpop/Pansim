@@ -546,9 +546,21 @@ impl Population {
                         let mut non_zero_weights: Vec<f32> = locus_weights[site_idx].clone();
                         let mut total_0: usize = 0;
                         for (idx, &val) in row.indexed_iter() {
+                            let mut update: bool = false;
+                            
+                            // check for any zeroes in either vector
+                            if non_zero_weights[idx] == 0.0 {
+                                update = true;
+                            }
+
                             if val == 0 {
                                 non_zero_weights[idx] = 0.0;
-                                total_0 += 1
+                                update = true;
+                            }
+
+                            if update == true 
+                            {
+                                total_0 += 1;
                             }
                         }
 
@@ -556,6 +568,15 @@ impl Population {
                         // sampled_loci = (0..n_sites)
                         // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
                         // .collect();
+                        
+                        //let sum : f32 = non_zero_weights.clone().iter().sum();
+                        // if sum == 0.0 {
+                        //     println!("total_0: {:?}", total_0);
+                        //     println!("non_zero_weights.len(): {:?}", non_zero_weights.len());
+                            
+                        //     println!("non_zero_weights.sum(): {:?}", sum);
+                        // }
+
 
                         // ensure some non-zero values present
                         if total_0 < non_zero_weights.len() {
