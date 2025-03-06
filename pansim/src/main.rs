@@ -364,6 +364,12 @@ impl Population {
 
         for site_idx in 0..mutations_vec.len() {
             let mutations = mutations_vec[site_idx];
+            
+            // avoid rate parameter of 0
+            if mutations == 0.0 {
+                continue;
+            }
+            
             let poisson = Poisson::new(mutations).unwrap();
 
             if self.core == false {
@@ -459,6 +465,11 @@ impl Population {
 
         for site_idx in 0..recombinations_vec.len() {
             let n_recombinations = recombinations_vec[site_idx];
+
+            // avoid rate parameter of 0
+            if n_recombinations == 0.0 {
+                continue;
+            }
 
             let poisson_recomb = Poisson::new(n_recombinations).unwrap();
 
