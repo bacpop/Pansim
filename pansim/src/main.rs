@@ -7,9 +7,11 @@ use rand_distr::Beta;
 use rayon::prelude::*;
 
 use statrs::distribution::Poisson;
+use statrs::distribution::Exp;
+use statrs::distribution::Uniform;
 
 use crate::rand::distributions::Distribution;
-use rand::distributions::Uniform;
+use rand::distributions::Uniform as randUniform;
 use rand::distributions::WeightedIndex;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
@@ -493,7 +495,7 @@ impl Population {
             // }
 
             // recipient distribution, minus one to avoid comparison with self
-            let dist: Uniform<usize> = Uniform::new(0, self.pop.nrows() - 1);
+            let dist: randUniform<usize> = randUniform::new(0, self.pop.nrows() - 1);
 
             // for each genome, determine which positions are being transferred
             self.pop
@@ -834,6 +836,21 @@ fn main() -> io::Result<()> {
         .help("Proportion of pangenome made up of compartment 2 genes. Must be 0.0 <= X <= 1.0")
         .required(false)
         .default_value("0.1"))
+    .arg(Arg::new("prop_positive")
+        .long("prop_positive")
+        .help("Proportion of pangenome made up of positively selected genes. Must be 0.0 <= X <= 1.0. If negative, neutral selection is simulated.")
+        .required(false)
+        .default_value("0.5"))
+    .arg(Arg::new("pos_lambda")
+        .long("pos_lambda")
+        .help("Lambda value for exponential distribution of positively selected genes. Must be > 0.0")
+        .required(false)
+        .default_value("0.0"))
+    .arg(Arg::new("neg_lambda")
+        .long("neg_lambda")
+        .help("Lambda value for exponential distribution of negatively selected genes. Must be > 0.0.")
+        .required(false)
+        .default_value("0.0"))
     .arg(Arg::new("seed")
         .long("seed")
         .help("Seed for random number generation.")
@@ -876,6 +893,9 @@ fn main() -> io::Result<()> {
     let rate_genes1: f64 = matches.value_of_t("rate_genes1").unwrap();
     let rate_genes2: f64 = matches.value_of_t("rate_genes2").unwrap();
     let prop_genes2: f64 = matches.value_of_t("prop_genes2").unwrap();
+    let prop_positive: f64 = matches.value_of_t("prop_positive").unwrap();
+    let pos_lambda: f64 = matches.value_of_t("pos_lambda").unwrap();
+    let neg_lambda: f64 = matches.value_of_t("neg_lambda").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
     let competition = matches.is_present("competition");
@@ -898,6 +918,13 @@ fn main() -> io::Result<()> {
         println!("HR_rate and HGT_rate must be above 0.0");
         println!("HR_rate: {}", HR_rate);
         println!("HGT_rate: {}", HGT_rate);
+        return Ok(());
+    }
+
+    if (pos_lambda < 0.0 || neg_lambda < 0.0) {
+        println!("pos_lambda and neg_lambda must be above 0.0");
+        println!("pos_lambda: {}", pos_lambda);
+        println!("neg_lambda: {}", neg_lambda);
         return Ok(());
     }
 
@@ -974,6 +1001,31 @@ fn main() -> io::Result<()> {
     let core_weights: Vec<Vec<f32>> = vec![vec![1.0; core_size]; 1];
     let mut pan_weights: Vec<Vec<f32>> = vec![];
     let mut n_pan_mutations: Vec<f64> = vec![];
+    let mut selection_weights: Vec<f64> = vec![0.0; pan_size];
+
+    let mut rng: StdRng = StdRng::seed_from_u64(seed);
+    
+    // calculate selection weights for each gene
+    if prop_positive >= 0.0 {
+        let uniform: Uniform = Uniform::new(0.0, 1.0).unwrap();
+        let exponential_pos: Exp = Exp::new(pos_lambda).unwrap();
+        let exponential_neg: Exp = Exp::new(neg_lambda).unwrap();
+        
+        for i in 0..pan_size {
+            let weight: f64 = uniform.sample(&mut rng) as f64;
+
+            let mut selection_coeffient: f64 = 0.0;
+
+            // positively selected gene
+            if weight <= prop_positive {
+                selection_coeffient = exponential_pos.sample(&mut rng);
+            } else {
+                selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
+            }
+            selection_weights[i] = selection_coeffient;
+
+        }
+    }
 
     // calculate sites for fast accessory genome
     let num_gene1_sites = (pan_size as f64 * (1.0 - prop_genes2)).round() as usize;
@@ -1007,8 +1059,6 @@ fn main() -> io::Result<()> {
             n_recombinations_pan_total * prop_gene2_sites; //(rate_genes2 / (rate_genes1 + rate_genes2));
         n_recombinations_pan.push(n_recombinations_pan_gene2);
     }
-
-    let mut rng: StdRng = StdRng::seed_from_u64(seed);
 
     // generate sampling distribution for genes in accessory genome
     let acc_sampling_vec = sample_beta(pan_size, &mut rng);
