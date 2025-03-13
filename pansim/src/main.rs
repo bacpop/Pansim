@@ -1043,15 +1043,14 @@ fn main() -> io::Result<()> {
             // positively selected gene
             if weight <= prop_positive {
                 selection_coeffient = exponential_pos.sample(&mut rng);
-                selection_coeffient = 1000.0;
+                //selection_coeffient = 1000.0;
             } else {
                 selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
 
                 while selection_coeffient < -1.0 {
                     selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
                 }
-
-                selection_coeffient = -1.0;
+                //selection_coeffient = -1.0;
             }
             selection_weights[i] = selection_coeffient;
         }
