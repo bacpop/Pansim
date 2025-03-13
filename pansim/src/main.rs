@@ -865,6 +865,7 @@ fn main() -> io::Result<()> {
         .help("Proportion of pangenome made up of positively selected genes. Must be 0.0 <= X <= 1.0. If negative, neutral selection is simulated.")
         .required(false)
         .default_value("0.5"))
+        .allow_hyphen_values(true)
     .arg(Arg::new("pos_lambda")
         .long("pos_lambda")
         .help("Lambda value for exponential distribution of positively selected genes. Must be > 0.0")
