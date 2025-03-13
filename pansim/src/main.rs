@@ -320,6 +320,8 @@ impl Population {
             .collect();
 
         //println!("proportions:\n{:?}", proportions);
+        println!("selection_coefficients:\n{:?}", selection_coefficients);
+        println!("selection_weights:\n{:?}", selection_weights);
 
         // Calculate the differences from avg_gene_freq
         let differences: Vec<i32> = num_genes
@@ -860,12 +862,12 @@ fn main() -> io::Result<()> {
         .long("pos_lambda")
         .help("Lambda value for exponential distribution of positively selected genes. Must be > 0.0")
         .required(false)
-        .default_value("0.0"))
+        .default_value("0.1"))
     .arg(Arg::new("neg_lambda")
         .long("neg_lambda")
         .help("Lambda value for exponential distribution of negatively selected genes. Must be > 0.0.")
         .required(false)
-        .default_value("0.0"))
+        .default_value("0.1"))
     .arg(Arg::new("seed")
         .long("seed")
         .help("Seed for random number generation.")
@@ -936,7 +938,7 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
-    if (pos_lambda < 0.0 || neg_lambda < 0.0) {
+    if (pos_lambda <= 0.0 || neg_lambda <= 0.0) {
         println!("pos_lambda and neg_lambda must be above 0.0");
         println!("pos_lambda: {}", pos_lambda);
         println!("neg_lambda: {}", neg_lambda);
@@ -1037,8 +1039,8 @@ fn main() -> io::Result<()> {
             } else {
                 selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
 
-                if selection_coeffient < -1.0 {
-                    selection_coeffient = -1.0
+                while selection_coeffient < -1.0 {
+                    selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
                 }
             }
             selection_weights[i] = selection_coeffient;
