@@ -312,16 +312,20 @@ impl Population {
                 let sum: f64 = row
                     .iter()
                     .enumerate()
-                    .map(|(col_idx, &col_val)| 1.0 + (selection_coefficients[col_idx] * col_val as f64)).product();
-                sum
+                    .map(|(col_idx, &col_val)| 1.0 + (selection_coefficients[col_idx] * col_val as f64)).sum();
+                sum / row.len() as f64
                 //let count = row.len();
                 //sum as f64 / count as f64
             })
             .collect();
 
         //println!("proportions:\n{:?}", proportions);
-        println!("selection_coefficients:\n{:?}", selection_coefficients);
-        println!("selection_weights:\n{:?}", selection_weights);
+        //println!("selection_coefficients:\n{:?}", selection_coefficients);
+        //println!("selection_weights:\n{:?}", selection_weights);
+        //let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        //println!("max_selection_coefficients\n{:?}", max_selection_coefficients);
+        //let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        //println!("max_selection_weights\n{:?}", max_selection_weights);
 
         // Calculate the differences from avg_gene_freq
         let differences: Vec<i32> = num_genes
@@ -339,11 +343,14 @@ impl Population {
             .map(|(row_idx, &diff)| 0.99_f64.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
 
+        //println!("weights:\n{:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             weights[i] *= avg_pairwise_dists[i];
         }
 
+        //let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        //println!("max_weights\n{:?}", max_weights);
         //println!("max_diff:\n{:?}", max_diff);
         //println!("weights:\n{:?}", weights);
 
