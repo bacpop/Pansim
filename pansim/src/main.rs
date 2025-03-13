@@ -322,10 +322,10 @@ impl Population {
         //println!("proportions:\n{:?}", proportions);
         //println!("selection_coefficients:\n{:?}", selection_coefficients);
         //println!("selection_weights:\n{:?}", selection_weights);
-        //let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        //println!("max_selection_coefficients\n{:?}", max_selection_coefficients);
-        //let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        //println!("max_selection_weights\n{:?}", max_selection_weights);
+        // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        // println!("max_selection_coefficients\n{:?}", max_selection_coefficients);
+        // let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        // println!("max_selection_weights\n{:?}", max_selection_weights);
 
         // Calculate the differences from avg_gene_freq
         let differences: Vec<i32> = num_genes
@@ -340,7 +340,7 @@ impl Population {
         let mut weights: Vec<f64> = differences
             .iter()
             .enumerate()
-            .map(|(row_idx, &diff)| 0.99_f64.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
+            .map(|(row_idx, &diff)| 0.99_f64.powi(diff) + selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
 
         //println!("weights:\n{:?}", weights);
@@ -349,8 +349,8 @@ impl Population {
             weights[i] *= avg_pairwise_dists[i];
         }
 
-        //let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        //println!("max_weights\n{:?}", max_weights);
+        // let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        // println!("max_weights\n{:?}", max_weights);
         //println!("max_diff:\n{:?}", max_diff);
         //println!("weights:\n{:?}", weights);
 
@@ -1025,7 +1025,7 @@ fn main() -> io::Result<()> {
     let core_weights: Vec<Vec<f32>> = vec![vec![1.0; core_size]; 1];
     let mut pan_weights: Vec<Vec<f32>> = vec![];
     let mut n_pan_mutations: Vec<f64> = vec![];
-    let mut selection_weights: Vec<f64> = vec![1.0; pan_size];
+    let mut selection_weights: Vec<f64> = vec![0.0; pan_size];
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
     
@@ -1043,12 +1043,15 @@ fn main() -> io::Result<()> {
             // positively selected gene
             if weight <= prop_positive {
                 selection_coeffient = exponential_pos.sample(&mut rng);
+                selection_coeffient = 1000.0;
             } else {
                 selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
 
                 while selection_coeffient < -1.0 {
                     selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
                 }
+
+                selection_coeffient = -1.0;
             }
             selection_weights[i] = selection_coeffient;
         }
