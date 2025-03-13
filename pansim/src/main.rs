@@ -8,10 +8,9 @@ use rayon::prelude::*;
 
 use statrs::distribution::Poisson;
 use statrs::distribution::Exp;
-use statrs::distribution::Uniform;
 
 use crate::rand::distributions::Distribution;
-use rand::distributions::Uniform as randUniform;
+use rand::distributions::Uniform;
 use rand::distributions::WeightedIndex;
 use rand::rngs::StdRng;
 use rand::seq::IteratorRandom;
@@ -292,6 +291,7 @@ impl Population {
         rng: &mut StdRng,
         avg_gene_num: i32,
         avg_pairwise_dists: Vec<f64>,
+        selection_coefficients: &Vec<f64>,
     ) -> Vec<usize> {
         // Calculate the proportion of 1s for each row
         let num_genes: Vec<i32> = self
@@ -299,6 +299,20 @@ impl Population {
             .axis_iter(Axis(0))
             .map(|row| {
                 let sum: i32 = row.iter().map(|&x| x as i32).sum();
+                sum
+                //let count = row.len();
+                //sum as f64 / count as f64
+            })
+            .collect();
+
+        let selection_weights: Vec<f64> = self
+            .pop
+            .axis_iter(Axis(0))
+            .map(|row| {
+                let sum: f64 = row
+                    .iter()
+                    .enumerate()
+                    .map(|(col_idx, &col_val)| 1.0 + (selection_coefficients[col_idx] * col_val as f64)).product();
                 sum
                 //let count = row.len();
                 //sum as f64 / count as f64
@@ -319,7 +333,8 @@ impl Population {
         //let max_diff = differences.iter().cloned().fold(0./0., f64::max);
         let mut weights: Vec<f64> = differences
             .iter()
-            .map(|&diff| 0.99_f64.powi(diff)) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
+            .enumerate()
+            .map(|(row_idx, &diff)| 0.99_f64.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
 
         // update weights with average pairwise distance
@@ -495,7 +510,7 @@ impl Population {
             // }
 
             // recipient distribution, minus one to avoid comparison with self
-            let dist: randUniform<usize> = randUniform::new(0, self.pop.nrows() - 1);
+            let dist: Uniform<usize> = Uniform::new(0, self.pop.nrows() - 1);
 
             // for each genome, determine which positions are being transferred
             self.pop
@@ -1001,13 +1016,13 @@ fn main() -> io::Result<()> {
     let core_weights: Vec<Vec<f32>> = vec![vec![1.0; core_size]; 1];
     let mut pan_weights: Vec<Vec<f32>> = vec![];
     let mut n_pan_mutations: Vec<f64> = vec![];
-    let mut selection_weights: Vec<f64> = vec![0.0; pan_size];
+    let mut selection_weights: Vec<f64> = vec![1.0; pan_size];
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
     
     // calculate selection weights for each gene
     if prop_positive >= 0.0 {
-        let uniform: Uniform = Uniform::new(0.0, 1.0).unwrap();
+        let uniform: Uniform<f64> = Uniform::new(0.0, 1.0);
         let exponential_pos: Exp = Exp::new(pos_lambda).unwrap();
         let exponential_neg: Exp = Exp::new(neg_lambda).unwrap();
         
@@ -1021,9 +1036,12 @@ fn main() -> io::Result<()> {
                 selection_coeffient = exponential_pos.sample(&mut rng);
             } else {
                 selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
+
+                if selection_coeffient < -1.0 {
+                    selection_coeffient = -1.0
+                }
             }
             selection_weights[i] = selection_coeffient;
-
         }
     }
 
@@ -1135,7 +1153,7 @@ fn main() -> io::Result<()> {
             }
 
             let sampled_individuals =
-                pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists);
+                pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists, &selection_weights);
             core_genome.next_generation(&sampled_individuals);
             //println!("finished copying core genome {}", j);
             pan_genome.next_generation(&sampled_individuals);
