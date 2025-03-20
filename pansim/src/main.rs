@@ -1172,24 +1172,24 @@ fn main() -> io::Result<()> {
             //println!("finished copying pangenome {}", j);
         }
 
-        // if at final generation, just sample, otherwise mutate
-        if j < (n_gen - 1) {
-            // mutate core genome
-            //println!("started {}", j);
-            core_genome.mutate_alleles(&n_core_mutations, &mut rng, &core_weighted_dist);
+        // mutate core genome
+        //println!("started {}", j);
+        core_genome.mutate_alleles(&n_core_mutations, &mut rng, &core_weighted_dist);
 
-            //println!("finished mutating core genome {}", j);
-            pan_genome.mutate_alleles(&n_pan_mutations, &mut rng, &pan_weighted_dist);
-            //println!("finished mutating pangenome {}", j);
+        //println!("finished mutating core genome {}", j);
+        pan_genome.mutate_alleles(&n_pan_mutations, &mut rng, &pan_weighted_dist);
+        //println!("finished mutating pangenome {}", j);
 
-            // recombine populations
-            if HR_rate > 0.0 {
-                core_genome.recombine(&n_recombinations_core, &mut rng, &core_weights);
-            }
-            if HGT_rate > 0.0 {
-                pan_genome.recombine(&n_recombinations_pan, &mut rng, &pan_weights);
-            }
-        } else {
+        // recombine populations
+        if HR_rate > 0.0 {
+            core_genome.recombine(&n_recombinations_core, &mut rng, &core_weights);
+        }
+        if HGT_rate > 0.0 {
+            pan_genome.recombine(&n_recombinations_pan, &mut rng, &pan_weights);
+        }
+        
+        // if at final generation, sample
+        if j == n_gen -1 {
             let final_avg_gene_freq = pan_genome.calc_gene_freq();
             if verbose {
                 println!("final avg_gene_freq: {}", final_avg_gene_freq);
