@@ -309,23 +309,30 @@ impl Population {
             .pop
             .axis_iter(Axis(0))
             .map(|row| {
-                let sum: f64 = row
+                let log_values: Vec<f64> = row
                     .iter()
                     .enumerate()
-                    .map(|(col_idx, &col_val)| 1.0 + (selection_coefficients[col_idx] * col_val as f64)).sum();
-                sum / row.len() as f64
-                //let count = row.len();
-                //sum as f64 / count as f64
+                    .map(|(col_idx, &col_val)| (1.0 + selection_coefficients[col_idx] * col_val as f64).ln())
+                    .collect();
+    
+                let max_log = *log_values.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                let sum_exp = log_values.iter().map(|&v| (v - max_log).exp()).sum::<f64>().ln() + max_log;
+    
+                (sum_exp - (row.len() as f64).ln()).exp() // Adjusting for mean
             })
             .collect();
 
         //println!("proportions:\n{:?}", proportions);
-        //println!("selection_coefficients:\n{:?}", selection_coefficients);
-        //println!("selection_weights:\n{:?}", selection_weights);
+        // println!("selection_coefficients:\n{:?}", selection_coefficients);
+        // println!("selection_weights:\n{:?}", selection_weights);
         // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
         // println!("max_selection_coefficients\n{:?}", max_selection_coefficients);
+        // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
+        // println!("min_selection_coefficients\n{:?}", min_selection_coefficients);
         // let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
         // println!("max_selection_weights\n{:?}", max_selection_weights);
+        // let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
+        // println!("min_selection_weights\n{:?}", min_selection_weights);
 
         // Calculate the differences from avg_gene_freq
         let differences: Vec<i32> = num_genes
@@ -340,7 +347,7 @@ impl Population {
         let mut weights: Vec<f64> = differences
             .iter()
             .enumerate()
-            .map(|(row_idx, &diff)| 0.99_f64.powi(diff) + selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
+            .map(|(row_idx, &diff)| 0.99_f64.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
 
         //println!("weights:\n{:?}", weights);
@@ -348,6 +355,13 @@ impl Population {
         for i in 0..weights.len() {
             weights[i] *= avg_pairwise_dists[i];
         }
+
+        // let mean_weights = average(&weights);
+        // println!("mean_weights\n{:?}", mean_weights);
+        // let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        // println!("max_weights\n{:?}", max_weights);
+        // let min_weights = weights.iter().copied().fold(f64::INFINITY, f64::min);
+        // println!("min_weights\n{:?}", min_weights);
 
         // let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
         // println!("max_weights\n{:?}", max_weights);
@@ -1046,12 +1060,12 @@ fn main() -> io::Result<()> {
                 selection_coeffient = exponential_pos.sample(&mut rng);
                 //selection_coeffient = 1000.0;
             } else {
-                selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
+                selection_coeffient = exponential_neg.sample(&mut rng);
 
-                while selection_coeffient < -1.0 {
-                    selection_coeffient = -1.0 * exponential_neg.sample(&mut rng);
+                while selection_coeffient > 1.0 {
+                    selection_coeffient = exponential_neg.sample(&mut rng);
                 }
-                //selection_coeffient = -1.0;
+                selection_coeffient = -1.0 * selection_coeffient;
             }
             selection_weights[i] = selection_coeffient;
         }
