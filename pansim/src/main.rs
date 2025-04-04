@@ -305,7 +305,11 @@ impl Population {
             })
             .collect();
 
-        let selection_weights: Vec<f64> = self
+        let mut selection_weights: Vec<f64> = vec![1.0; self.pop.nrows()];
+
+        // ensure accessory genome present
+        if self.pop.ncols() > 0 {
+            selection_weights = self
             .pop
             .axis_iter(Axis(0))
             .map(|row| {
@@ -321,6 +325,7 @@ impl Population {
                 (sum_exp - (row.len() as f64).ln()).exp() // Adjusting for mean
             })
             .collect();
+        }
 
         //println!("proportions:\n{:?}", proportions);
         // println!("selection_coefficients:\n{:?}", selection_coefficients);
