@@ -28,6 +28,8 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::usize;
 
+use logsumexp::LogSumExp;
+
 fn jaccard_distance(row1: &[u8], row2: &[u8]) -> (usize, usize) {
     assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
 
@@ -292,6 +294,8 @@ impl Population {
         avg_gene_num: i32,
         avg_pairwise_dists: Vec<f64>,
         selection_coefficients: &Vec<f64>,
+        verbose: bool,
+        no_control_genome_size: bool
     ) -> Vec<usize> {
         // Calculate the proportion of 1s for each row
         let num_genes: Vec<i32> = self
@@ -318,26 +322,16 @@ impl Population {
                     .enumerate()
                     .map(|(col_idx, &col_val)| (1.0 + selection_coefficients[col_idx] * col_val as f64).ln())
                     .collect();
+
+                let log_mean = log_values.into_iter().map(|x| x).ln_sum_exp() - (row.len() as f64).ln();
+                // let max_log = *log_values.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+                // let sum_exp = log_values.iter().map(|&v| (v - max_log).exp()).sum::<f64>().ln() + max_log;
     
-                let max_log = *log_values.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                let sum_exp = log_values.iter().map(|&v| (v - max_log).exp()).sum::<f64>().ln() + max_log;
-    
-                (sum_exp - (row.len() as f64).ln()).exp() // Adjusting for mean
+                log_mean.exp() // Exponentiate
             })
             .collect();
         }
 
-        //println!("proportions:\n{:?}", proportions);
-        // println!("selection_coefficients:\n{:?}", selection_coefficients);
-        // println!("selection_weights:\n{:?}", selection_weights);
-        // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        // println!("max_selection_coefficients\n{:?}", max_selection_coefficients);
-        // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
-        // println!("min_selection_coefficients\n{:?}", min_selection_coefficients);
-        // let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        // println!("max_selection_weights\n{:?}", max_selection_weights);
-        // let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
-        // println!("min_selection_weights\n{:?}", min_selection_weights);
 
         // Calculate the differences from avg_gene_freq
         let differences: Vec<i32> = num_genes
@@ -345,33 +339,56 @@ impl Population {
             .map(|&n_genes| (n_genes - avg_gene_num).abs())
             .collect();
 
-        //println!("differences:\n{:?}", differences);
-
         // Convert differences to weights (lower difference should have higher weight)
         //let max_diff = differences.iter().cloned().fold(0./0., f64::max);
-        let mut weights: Vec<f64> = differences
+        let mut weights : Vec<f64>;
+        if no_control_genome_size == false {
+            weights = differences
             .iter()
             .enumerate()
             .map(|(row_idx, &diff)| 0.99_f64.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
             .collect();
+        } else {
+            weights = selection_weights.iter().copied().collect();
+        }
 
-        //println!("weights:\n{:?}", weights);
+
+        //println!("weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             weights[i] *= avg_pairwise_dists[i];
         }
 
-        // let mean_weights = average(&weights);
-        // println!("mean_weights\n{:?}", mean_weights);
-        // let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        // println!("max_weights\n{:?}", max_weights);
-        // let min_weights = weights.iter().copied().fold(f64::INFINITY, f64::min);
-        // println!("min_weights\n{:?}", min_weights);
+        if verbose {
+            // printing selection weights pre-size selection
 
-        // let max_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-        // println!("max_weights\n{:?}", max_weights);
-        //println!("max_diff:\n{:?}", max_diff);
-        //println!("weights:\n{:?}", weights);
+            //println!("proportions: {:?}", proportions);
+            // println!("selection_coefficients: {:?}", selection_coefficients);
+            // println!("selection_weights: {:?}", selection_weights);
+            // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+            // println!("max_selection_coefficients: {:?}", max_selection_coefficients);
+            // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
+            // println!("min_selection_coefficients: {:?}", min_selection_coefficients);
+            let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+            println!("max_selection_weights: {:?}", max_selection_weights);
+            let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
+            println!("min_selection_weights: {:?}", min_selection_weights);
+            let mean_selection_weights = average(&selection_weights);
+            println!("mean_selection_weights: {:?}", mean_selection_weights);
+
+            //println!("differences: {:?}", differences);
+
+            // printing selection weights post-size selection
+            let mean_final_weights = average(&weights);
+            println!("mean_final_weights: {:?}", mean_final_weights);
+            let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+            println!("max_final_weights: {:?}", max_final_weights);
+            let min_final_weights = weights.iter().copied().fold(f64::INFINITY, f64::min);
+            println!("min_final_weights: {:?}", min_final_weights);
+
+            //println!("max_diff: {:?}", max_diff);
+            //println!("weights: {:?}", weights);
+        }
 
         // Create a WeightedIndex distribution based on weights
         let dist = WeightedIndex::new(&weights).unwrap();
@@ -379,7 +396,7 @@ impl Population {
         // Sample rows based on the distribution
         let sampled_indices: Vec<usize> = (0..self.pop.nrows()).map(|_| dist.sample(rng)).collect();
 
-        //println!("sampled_indices:\n{:?}", sampled_indices);
+        //println!("sampled_indices: {:?}", sampled_indices);
 
         sampled_indices
     }
@@ -753,7 +770,7 @@ impl Population {
             })
             .collect();
 
-        //println!("new distances:\n{:?}", distances);
+        //println!("new distances: {:?}", distances);
         distances
     }
 
@@ -773,16 +790,16 @@ impl Population {
                 let i = range1[current_index];
                 let j = range2[current_index];
 
-                //println!("i:\n{:?}", i);
-                //println!("j:\n{:?}", j);
+                //println!("i: {:?}", i);
+                //println!("j: {:?}", j);
 
                 let row1 = contiguous_array.index_axis(Axis(0), i);
                 let row2 = contiguous_array.index_axis(Axis(0), j);
                 let row1_slice = row1.as_slice().unwrap().to_vec();
                 let row2_slice = row2.as_slice().unwrap().to_vec();
 
-                //println!("rowi:\n{:?}", row1);
-                //println!("rowj:\n{:?}", row2);
+                //println!("rowi: {:?}", row1);
+                //println!("rowj: {:?}", row2);
 
                 let mut _final_distance: f64 = 0.0;
 
@@ -795,7 +812,7 @@ impl Population {
                         - ((intersection as f64 + matches + self.core_genes as f64)
                             / (union as f64 + matches + self.core_genes as f64));
                 }
-                //println!("_final_distance:\n{:?}", _final_distance);
+                //println!("_final_distance: {:?}", _final_distance);
                 _final_distance
             })
             .collect();
@@ -920,6 +937,11 @@ fn main() -> io::Result<()> {
         .help("Prints generation and time to completion")
         .required(false)
         .takes_value(false))
+    .arg(Arg::new("no_control_genome_size")
+        .long("no_control_genome_size")
+        .help("Removes penalisation of genome sizes deviating from average.")
+        .required(false)
+        .takes_value(false))
     .get_matches();
 
     // Set the argument to a variable
@@ -945,6 +967,7 @@ fn main() -> io::Result<()> {
     let competition = matches.is_present("competition");
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
+    let no_control_genome_size: bool = matches.is_present("no_control_genome_size");
 
     //let verbose = true;
 
@@ -1184,7 +1207,7 @@ fn main() -> io::Result<()> {
             }
 
             let sampled_individuals =
-                pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists, &selection_weights);
+                pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists, &selection_weights, verbose, no_control_genome_size);
             core_genome.next_generation(&sampled_individuals);
             //println!("finished copying core genome {}", j);
             pan_genome.next_generation(&sampled_individuals);
@@ -1209,10 +1232,6 @@ fn main() -> io::Result<()> {
         
         // if at final generation, sample
         if j == n_gen -1 {
-            let final_avg_gene_freq = pan_genome.calc_gene_freq();
-            if verbose {
-                println!("final avg_gene_freq: {}", final_avg_gene_freq);
-            }
 
             // else calculate hamming and jaccard distances
             let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
@@ -1252,6 +1271,8 @@ fn main() -> io::Result<()> {
         //let elapsed = now_gen.elapsed();
         if verbose {
             println!("Finished gen: {}", j + 1);
+            let avg_gene_freq = pan_genome.calc_gene_freq();
+            println!("avg_gene_freq: {}", avg_gene_freq);
         }
         //println!("Elapsed: {:.2?}", elapsed);
     }
