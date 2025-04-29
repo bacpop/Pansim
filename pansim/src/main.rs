@@ -125,6 +125,7 @@ fn get_variable_loci(
     (contiguous_array, matches)
 }
 
+// TODO take vetor as reference and update in place rather then returning new vector each time
 fn get_distance(
     i: usize,
     nrows: usize,
@@ -135,7 +136,7 @@ fn get_distance(
     ncols: usize,
 ) -> Vec<f64> {
     let row1 = contiguous_array.index_axis(Axis(0), i);
-    let row1_slice = row1.as_slice().unwrap().to_vec(); // Avoid multiple calls
+    let row1_slice = row1.as_slice().unwrap();//.to_vec(); // Avoid multiple calls
 
     (0..nrows)
         .filter_map(|j| {
@@ -144,13 +145,13 @@ fn get_distance(
             }
 
             let row2 = contiguous_array.index_axis(Axis(0), j);
-            let row2_slice = row2.as_slice().unwrap().to_vec(); // Single call
+            let row2_slice = row2.as_slice().unwrap();//.to_vec(); // Single call
 
             let pair_distance = if core {
-                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
+                let distance = hamming::distance_fast(row1_slice, row2_slice).unwrap();
                 distance as f64 / (ncols as f64)
             } else {
-                let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
+                let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
                 1.0 - ((intersection as f64 + matches + core_genes as f64)
                     / (union as f64 + matches + core_genes as f64))
             };
@@ -323,15 +324,23 @@ impl Population {
                     .map(|(col_idx, &col_val)| (1.0 + selection_coefficients[col_idx] * col_val as f64).ln())
                     .collect();
 
-                let log_mean = log_values.into_iter().map(|x| x).ln_sum_exp() - (row.len() as f64).ln();
-                // let max_log = *log_values.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
-                // let sum_exp = log_values.iter().map(|&v| (v - max_log).exp()).sum::<f64>().ln() + max_log;
+                //println!("log_values: {:?}", log_values);
+                
+                //println!("log_values: {:?}", log_values);
+                let neg_inf = log_values.contains(&std::f64::NEG_INFINITY);
+
+                //let log_mean = log_values.into_iter().map(|x| x).ln_sum_exp() - (row.len() as f64).ln();
+                let mut log_sum = 0.0;
+                if neg_inf == false {
+                    log_sum = log_values.into_iter().map(|x| x).ln_sum_exp().exp();
+                }
     
-                log_mean.exp() // Exponentiate
+                log_sum
             })
             .collect();
         }
 
+        // TODO: work out why when prop_positive = 0, genome size still increases (should favour reduction in genome size)
 
         // Calculate the differences from avg_gene_freq
         let differences: Vec<i32> = num_genes
@@ -352,23 +361,25 @@ impl Population {
             weights = selection_weights.iter().copied().collect();
         }
 
-
         //println!("weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             weights[i] *= avg_pairwise_dists[i];
         }
 
+        // determine whether weights is only 0s
+        let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+
         if verbose {
             // printing selection weights pre-size selection
 
             //println!("proportions: {:?}", proportions);
-            // println!("selection_coefficients: {:?}", selection_coefficients);
-            // println!("selection_weights: {:?}", selection_weights);
-            // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-            // println!("max_selection_coefficients: {:?}", max_selection_coefficients);
-            // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
-            // println!("min_selection_coefficients: {:?}", min_selection_coefficients);
+            //println!("selection_coefficients: {:?}", selection_coefficients);
+            //println!("selection_weights: {:?}", selection_weights);
+            let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+            println!("max_selection_coefficients: {:?}", max_selection_coefficients);
+            let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
+            println!("min_selection_coefficients: {:?}", min_selection_coefficients);
             let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
             println!("max_selection_weights: {:?}", max_selection_weights);
             let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
@@ -381,13 +392,17 @@ impl Population {
             // printing selection weights post-size selection
             let mean_final_weights = average(&weights);
             println!("mean_final_weights: {:?}", mean_final_weights);
-            let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
             println!("max_final_weights: {:?}", max_final_weights);
             let min_final_weights = weights.iter().copied().fold(f64::INFINITY, f64::min);
             println!("min_final_weights: {:?}", min_final_weights);
 
             //println!("max_diff: {:?}", max_diff);
             //println!("weights: {:?}", weights);
+        }
+
+        // account for only zeros
+        if max_final_weights == 0.0 {
+            weights = vec![1.0; self.pop.nrows()];
         }
 
         // Create a WeightedIndex distribution based on weights
@@ -774,6 +789,7 @@ impl Population {
         distances
     }
 
+    // TODO update vector in place
     fn pairwise_distances(
         &mut self,
         max_distances: usize,
@@ -795,8 +811,8 @@ impl Population {
 
                 let row1 = contiguous_array.index_axis(Axis(0), i);
                 let row2 = contiguous_array.index_axis(Axis(0), j);
-                let row1_slice = row1.as_slice().unwrap().to_vec();
-                let row2_slice = row2.as_slice().unwrap().to_vec();
+                let row1_slice = row1.as_slice().unwrap();//.to_vec();
+                let row2_slice = row2.as_slice().unwrap();//.to_vec();
 
                 //println!("rowi: {:?}", row1);
                 //println!("rowj: {:?}", row2);
@@ -804,10 +820,10 @@ impl Population {
                 let mut _final_distance: f64 = 0.0;
 
                 if self.core == true {
-                    let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
+                    let distance = hamming::distance_fast(row1_slice, row2_slice).unwrap();
                     _final_distance = distance as f64 / (self.pop.ncols() as f64);
                 } else {
-                    let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
+                    let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
                     _final_distance = 1.0
                         - ((intersection as f64 + matches + self.core_genes as f64)
                             / (union as f64 + matches + self.core_genes as f64));
@@ -1086,7 +1102,7 @@ fn main() -> io::Result<()> {
             // positively selected gene
             if weight <= prop_positive {
                 selection_coeffient = exponential_pos.sample(&mut rng);
-                //selection_coeffient = 1000.0;
+                //selection_coeffient = 100.0;
             } else {
                 selection_coeffient = exponential_neg.sample(&mut rng);
 
