@@ -365,7 +365,7 @@ impl Population {
         }
 
         // Convert differences to weights (lower difference should have higher weight)
-        println!("raw_weights: {:?}", selection_weights);
+        //println!("raw_weights: {:?}", selection_weights);
         let mut weights : Vec<f64>;
         if no_control_genome_size == false {
             // Calculate the differences from avg_gene_freq
@@ -374,7 +374,7 @@ impl Population {
                 .map(|&n_genes| (n_genes - avg_gene_num).abs())
                 .collect();
 
-            println!("differences: {:?}", differences);
+            //println!("differences: {:?}", differences);
 
             weights = differences
                 .iter()
@@ -385,48 +385,48 @@ impl Population {
             weights = selection_weights.clone();
         }
 
-        println!("post_genome_size_weights: {:?}", weights);
+        //println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             weights[i] *= avg_pairwise_dists[i] * (1.0 / competition_strength);
         }
 
-        println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
-        println!("post_pairwise_weights: {:?}", weights);
-        let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
-        println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
+        // println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
+        // println!("post_pairwise_weights: {:?}", weights);
+        // let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
+        // println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
 
         // determine whether weights is only 0s
         let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
 
-        if verbose {
-            // printing selection weights pre-size selection
-            // println!("selection_weights: {:?}", selection_weights);
-            // //println!("selection_coefficients: {:?}", selection_coefficients);
-            // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-            // println!("max_selection_coefficients: {:?}", max_selection_coefficients);
-            // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
-            // println!("min_selection_coefficients: {:?}", min_selection_coefficients);
-            // let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-            // println!("max_selection_weights: {:?}", max_selection_weights);
-            // let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
-            // println!("min_selection_weights: {:?}", min_selection_weights);
-            // let mean_selection_weights = average(&selection_weights);
-            // println!("mean_selection_weights: {:?}", mean_selection_weights);
+        // if verbose {
+        //     // printing selection weights pre-size selection
+        //     // println!("selection_weights: {:?}", selection_weights);
+        //     // //println!("selection_coefficients: {:?}", selection_coefficients);
+        //     // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        //     // println!("max_selection_coefficients: {:?}", max_selection_coefficients);
+        //     // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
+        //     // println!("min_selection_coefficients: {:?}", min_selection_coefficients);
+        //     // let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+        //     // println!("max_selection_weights: {:?}", max_selection_weights);
+        //     // let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
+        //     // println!("min_selection_weights: {:?}", min_selection_weights);
+        //     // let mean_selection_weights = average(&selection_weights);
+        //     // println!("mean_selection_weights: {:?}", mean_selection_weights);
 
-            //println!("differences: {:?}", differences);
+        //     //println!("differences: {:?}", differences);
 
-            // printing selection weights post-size selection
-            //println!("final_weights: {:?}", weights);
-            let mean_final_weights = average(&weights);
-            println!("mean_final_weights: {:?}", mean_final_weights);
-            println!("max_final_weights: {:?}", max_final_weights);
-            let min_final_weights = weights.iter().copied().fold(f64::INFINITY, f64::min);
-            println!("min_final_weights: {:?}", min_final_weights);
+        //     // printing selection weights post-size selection
+        //     //println!("final_weights: {:?}", weights);
+        //     let mean_final_weights = average(&weights);
+        //     println!("mean_final_weights: {:?}", mean_final_weights);
+        //     println!("max_final_weights: {:?}", max_final_weights);
+        //     let min_final_weights = weights.iter().copied().fold(f64::INFINITY, f64::min);
+        //     println!("min_final_weights: {:?}", min_final_weights);
 
-            //println!("max_diff: {:?}", max_diff);
-            //println!("weights: {:?}", weights);
-        }
+        //     //println!("max_diff: {:?}", max_diff);
+        //     //println!("weights: {:?}", weights);
+        // }
 
         // account for only zeros
         if max_final_weights == 0.0 {
