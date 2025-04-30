@@ -298,7 +298,9 @@ impl Population {
         avg_pairwise_dists: Vec<f64>,
         selection_coefficients: &Vec<f64>,
         verbose: bool,
-        no_control_genome_size: bool
+        no_control_genome_size: bool,
+        genome_size_penalty: f64,
+        competition_strength: f64
     ) -> Vec<usize> {
         // Calculate the proportion of 1s for each row
         let num_genes: Vec<i32> = self
@@ -346,24 +348,24 @@ impl Population {
             // TODO: work out why when prop_positive = 0, genome size still increases (should favour reduction in genome size)
             let logsumexp_value = selection_weights.iter().ln_sum_exp();
 
-            println!("logsumexp_value: {:?}", logsumexp_value);
+            //println!("logsumexp_value: {:?}", logsumexp_value);
 
-            println!("raw_selection_weights: {:?}", selection_weights);
+            //println!("raw_selection_weights: {:?}", selection_weights);
 
             // Exponentiate and normalize
             selection_weights = selection_weights.into_iter()
                 .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
                 .collect();
 
-            println!("pre_norm_selection_weights: {:?}", selection_weights);
+            //println!("pre_norm_selection_weights: {:?}", selection_weights);
 
             let sum_weights: f64 = selection_weights.iter().sum();
-            println!("sum_weights: {:?}", sum_weights);
+            //println!("sum_weights: {:?}", sum_weights);
             selection_weights = selection_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
         }
 
         // Convert differences to weights (lower difference should have higher weight)
-        //let max_diff = differences.iter().cloned().fold(0./0., f64::max);
+        println!("raw_weights: {:?}", selection_weights);
         let mut weights : Vec<f64>;
         if no_control_genome_size == false {
             // Calculate the differences from avg_gene_freq
@@ -371,38 +373,46 @@ impl Population {
                 .iter()
                 .map(|&n_genes| (n_genes - avg_gene_num).abs())
                 .collect();
+
+            println!("differences: {:?}", differences);
+
             weights = differences
                 .iter()
                 .enumerate()
-                .map(|(row_idx, &diff)| 0.99_f64.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
+                .map(|(row_idx, &diff)| genome_size_penalty.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
                 .collect();
         } else {
             weights = selection_weights.clone();
         }
 
-        //println!("weights: {:?}", weights);
+        println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
-            weights[i] *= avg_pairwise_dists[i];
+            weights[i] *= avg_pairwise_dists[i] * (1.0 / competition_strength);
         }
+
+        println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
+        println!("post_pairwise_weights: {:?}", weights);
+        let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
+        println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
 
         // determine whether weights is only 0s
         let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
 
         if verbose {
             // printing selection weights pre-size selection
-            println!("selection_weights: {:?}", selection_weights);
-            //println!("selection_coefficients: {:?}", selection_coefficients);
-            let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-            println!("max_selection_coefficients: {:?}", max_selection_coefficients);
-            let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
-            println!("min_selection_coefficients: {:?}", min_selection_coefficients);
-            let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
-            println!("max_selection_weights: {:?}", max_selection_weights);
-            let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
-            println!("min_selection_weights: {:?}", min_selection_weights);
-            let mean_selection_weights = average(&selection_weights);
-            println!("mean_selection_weights: {:?}", mean_selection_weights);
+            // println!("selection_weights: {:?}", selection_weights);
+            // //println!("selection_coefficients: {:?}", selection_coefficients);
+            // let max_selection_coefficients = selection_coefficients.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+            // println!("max_selection_coefficients: {:?}", max_selection_coefficients);
+            // let min_selection_coefficients = selection_coefficients.iter().copied().fold(f64::INFINITY, f64::min);
+            // println!("min_selection_coefficients: {:?}", min_selection_coefficients);
+            // let max_selection_weights = selection_weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
+            // println!("max_selection_weights: {:?}", max_selection_weights);
+            // let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
+            // println!("min_selection_weights: {:?}", min_selection_weights);
+            // let mean_selection_weights = average(&selection_weights);
+            // println!("mean_selection_weights: {:?}", mean_selection_weights);
 
             //println!("differences: {:?}", differences);
 
@@ -976,6 +986,16 @@ fn main() -> io::Result<()> {
         .help("Removes penalisation of genome sizes deviating from average.")
         .required(false)
         .takes_value(false))
+    .arg(Arg::new("genome_size_penalty")
+        .long("genome_size_penalty")
+        .help("Multiplier for each gene difference between avg_gene_freq and observed value. Default = 0.99")
+        .required(false)
+        .default_value("0.99"))
+    .arg(Arg::new("competition_strength")
+        .long("competition_strength")
+        .help("Strength of competition felt by strain to all others. Default = 1.0")
+        .required(false)
+        .default_value("1.0"))
     .get_matches();
 
     // Set the argument to a variable
@@ -1002,6 +1022,8 @@ fn main() -> io::Result<()> {
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
     let no_control_genome_size: bool = matches.is_present("no_control_genome_size");
+    let genome_size_penalty: f64 = matches.value_of_t("genome_size_penalty").unwrap();
+    let competition_strength: f64 = matches.value_of_t("competition_strength").unwrap();
 
     //let verbose = true;
 
@@ -1259,7 +1281,7 @@ fn main() -> io::Result<()> {
         }
 
         let sampled_individuals =
-            pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists, &selection_weights, verbose, no_control_genome_size);
+            pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists, &selection_weights, verbose, no_control_genome_size, genome_size_penalty, competition_strength);
         
         core_genome.next_generation(&sampled_individuals);
         //println!("finished copying core genome {}", j);
