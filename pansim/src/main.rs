@@ -145,13 +145,16 @@ fn get_distance(
             }
 
             let row2 = contiguous_array.index_axis(Axis(0), j);
-            let row2_slice = row2.as_slice().unwrap().to_vec(); // Single call
 
             let pair_distance = if core {
-                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
+                let row2_slice = row2.as_slice().unwrap().to_vec(); // Single call
+                
+                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap() / 2;
                 distance as f64 / (ncols as f64)
             } else {
-                let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
+                let row2_slice = row2.as_slice().unwrap(); // Single call
+                
+                let (intersection, union) = jaccard_distance(&row1_slice, row2_slice);
                 1.0 - ((intersection as f64 + matches + core_genes as f64)
                     / (union as f64 + matches + core_genes as f64))
             };
@@ -205,6 +208,7 @@ impl Population {
             // ensure core is same across all isolates
             let allele_vec: Vec<u8> = (0..allele_count)
                 .map(|_| rng.gen_range(0..max_variants))
+                .map(|i| {1 << i})
                 .collect();
 
             pop.axis_iter_mut(Axis(0))
@@ -254,7 +258,7 @@ impl Population {
         // }
 
         let core_vec: Vec<Vec<u8>> =
-            vec![vec![1, 2, 3], vec![0, 2, 3], vec![0, 1, 3], vec![0, 1, 2]];
+            vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
 
         Self {
             pop,
@@ -538,7 +542,7 @@ impl Population {
 
                             // get possible values to mutate to, must be different from current value
                             let value = row[mutant_site];
-                            let values = &self.core_vec[value as usize];
+                            let values = &self.core_vec[1 >> value];
 
                             // sample new allele
                             let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
@@ -837,21 +841,26 @@ impl Population {
                 //println!("i: {:?}", i);
                 //println!("j: {:?}", j);
 
-                let row1 = contiguous_array.index_axis(Axis(0), i);
-                let row2 = contiguous_array.index_axis(Axis(0), j);
-                let row1_slice = row1.as_slice().unwrap().to_vec();
-                let row2_slice = row2.as_slice().unwrap().to_vec();
-
                 //println!("rowi: {:?}", row1);
                 //println!("rowj: {:?}", row2);
 
                 let mut _final_distance: f64 = 0.0;
 
                 if self.core == true {
-                    let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
+                    let row1 = contiguous_array.index_axis(Axis(0), i);
+                    let row2 = contiguous_array.index_axis(Axis(0), j);
+                    let row1_slice = row1.as_slice().unwrap().to_vec();
+                    let row2_slice = row2.as_slice().unwrap().to_vec();
+                    
+                    let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap() / 2;
                     _final_distance = distance as f64 / (self.pop.ncols() as f64);
                 } else {
-                    let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
+                    let row1 = contiguous_array.index_axis(Axis(0), i);
+                    let row2 = contiguous_array.index_axis(Axis(0), j);
+                    let row1_slice = row1.as_slice().unwrap();
+                    let row2_slice = row2.as_slice().unwrap();
+
+                    let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
                     _final_distance = 1.0
                         - ((intersection as f64 + matches + self.core_genes as f64)
                             / (union as f64 + matches + self.core_genes as f64));
