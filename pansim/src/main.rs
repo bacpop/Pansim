@@ -194,6 +194,17 @@ fn get_distance(
         .collect()
 }
 
+// Mapping function
+fn int_to_base(n: u8) -> char {
+    match n {
+        1 => 'A',
+        2 => 'C',
+        4 => 'G',
+        8 => 'T',
+        _ => 'N', // Unknown
+    }
+}
+
 struct Population {
     pop: Array2<u8>,
     core: bool,
@@ -1009,6 +1020,11 @@ fn main() -> io::Result<()> {
         .required(false)
         .takes_value(false))
         .help("Print per-generation average pairwise distances.")
+    .arg(Arg::new("print_matrices")
+        .long("print_matrices")
+        .required(false)
+        .takes_value(false))
+        .help("Prints core and accessory matrices.")
     .arg(Arg::new("threads")
         .long("threads")
         .help("Number of threads.")
@@ -1059,6 +1075,7 @@ fn main() -> io::Result<()> {
     let competition = matches.is_present("competition");
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
+    let print_matrices: bool = matches.is_present("print_matrices");
     let no_control_genome_size: bool = matches.is_present("no_control_genome_size");
     let genome_size_penalty: f64 = matches.value_of_t("genome_size_penalty").unwrap();
     let competition_strength: f64 = matches.value_of_t("competition_strength").unwrap();
@@ -1390,6 +1407,41 @@ fn main() -> io::Result<()> {
             .map(|(((w, x), y), z)| (w, x, y, z))
         {
             writeln!(file, "{}\t{}\t{}\t{}", avg_core, std_core, avg_acc, std_acc);
+        }
+    }
+
+    if print_matrices {
+        
+        // core genome
+        {
+            // Open output file
+            let mut output_file = outpref.to_owned();
+            let extension: &str = "_core_genome.csv";
+            output_file.push_str(extension);
+
+            let mut file = File::create(output_file)?;
+
+            // Iterate rows and write
+            for row in core_genome.pop.outer_iter() {
+                let line: Vec<String> = row.iter().map(|&x| int_to_base(x).to_string()).collect();
+                writeln!(file, "{}", line.join(","))?;
+            }
+        }
+        // pangenome
+        {
+            // Open output file
+            let mut output_file = outpref.to_owned();
+            let extension: &str = "_pangenome.csv";
+            output_file.push_str(extension);
+
+            let mut file = File::create(output_file)?;
+
+            // Iterate rows and write
+            for row in pan_genome.pop.outer_iter() {
+                let mut line: Vec<String> = vec![1_u8.to_string(); core_genes];
+                line.extend(row.iter().map(|&x| x.to_string()));
+                writeln!(file, "{}", line.join(","))?;
+            }
         }
     }
 
