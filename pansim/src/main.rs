@@ -1,655 +1,18 @@
-extern crate rand;
-extern crate statrs;
-extern crate rayon;
-extern crate ndarray;
-use rand_distr::{Beta};
-
-use rayon::{array, prelude::*, vec};
-
-use statrs::distribution::Poisson;
-
+use rand::prelude::*;
 use rand::rngs::StdRng;
-use rand::distributions::WeightedIndex;
-use rand::{Rng, SeedableRng};
-use rand::seq::IteratorRandom;
-use crate::rand::distributions::Distribution;
-use rand::seq::SliceRandom;
-use rand::RngCore;
 use rand::distributions::Uniform;
+use statrs::distribution::Exp;
+use rand::distributions::WeightedIndex;
+use rand::{SeedableRng};
 
-use ndarray::{Array1, Array2, Axis, s};
-use ndarray::Zip;
-use std::f64::MIN_POSITIVE;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use pansim::population::*;
+
+use clap::{Arg, Command};
 
 use std::fs::File;
 use std::io::{self, Write};
-use std::usize;
-use clap::{Arg, Command};
-
-fn jaccard_distance(row1: &[u8], row2:  &[u8]) -> (usize, usize) {
-    assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
-
-    let intersection: usize = row1.iter().zip(row2.iter()).filter(|&(x, y)| *x == 1 && *y == 1).count();
-    let union: usize = row1.iter().zip(row2.iter()).filter(|&(x, y)| *x == 1 || *y == 1).count();
-
-    (intersection, union)
-}
-
-fn average(numbers: &[f64]) -> f64 {
-    numbers.iter().sum::<f64>() as f64 / numbers.len() as f64
-}
-
-fn standard_deviation(values: &[f64]) -> (f64, f64) {
-   let mean = average(values);
-
-   let sum_of_squares: f64 = values
-        .iter()
-        .map(|&x| (x - mean).powi(2))
-        .sum();
-
-   let variance = sum_of_squares / (values.len() as f64);
-   (variance.sqrt(), mean)
-}
-
-fn sample_beta(num_samples: usize, rng : &mut StdRng) -> Vec<f64> {
-    
-    let mut return_vec : Vec<f64> = vec![0.0; num_samples];
-
-    // U-shaped beta distribution
-    let beta_dist = Beta::new(0.5, 0.5).unwrap();
-
-    for j in 0..num_samples {
-        let mut sample = beta_dist.sample(rng);
-
-        // avoid sampling core with frequency 1.0
-        while sample == 1.0 {
-            sample = beta_dist.sample(rng);
-        }
-        return_vec[j] = sample;
-    }
-    return return_vec;
-}
-
-fn non_constant_columns(array: &Array2<u8>) -> Vec<usize> {
-    (0..array.ncols())
-        .filter(|&col| {
-            let mut seen = [false; 256]; // Track encountered values
-            let mut unique_count = 0;
-
-            for &value in array.column(col).iter() {
-                if !seen[value as usize] {
-                    seen[value as usize] = true;
-                    unique_count += 1;
-                    if unique_count > 1 {
-                        return true; // Early exit if more than one unique value
-                    }
-                }
-            }
-            false
-        })
-        .collect()
-}
-
-fn get_variable_loci (core: bool, pop: &Array2<u8>) -> (ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>, f64) {
-    
-    // Determine which column indices have variance greater than 0
-    let columns_to_iter: Vec<usize> = non_constant_columns(&pop);
-
-    // get matches for jaccard distance calculation
-    let mut matches: f64 = 0.0;
-    if core != true {
-        matches = pop.axis_iter(Axis(1)).filter(|col| col.iter().all(|&x| x == 1)).count() as f64;
-    }
-    
-    let subset_array: Array2<u8> = pop.select(Axis(1), &columns_to_iter);
-    let mut contiguous_array: ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>> = Array2::zeros((subset_array.dim().0, subset_array.dim().1));
-    contiguous_array.assign(&subset_array);
-
-    (contiguous_array, matches)
-}
-
-fn get_distance(i: usize, nrows: usize, core_genes: usize, matches: f64, core: bool,
-    contiguous_array: &ndarray::Array2<u8>,
-    ncols: usize
-) -> Vec<f64> {
-    let row1 = contiguous_array.index_axis(Axis(0), i);
-    let row1_slice = row1.as_slice().unwrap().to_vec();  // Avoid multiple calls
-
-    (0..nrows)
-        .filter_map(|j| {
-            if j == i {
-                return None;  // Skip self-comparison
-            }
-
-            let row2 = contiguous_array.index_axis(Axis(0), j);
-            let row2_slice = row2.as_slice().unwrap().to_vec();  // Single call
-
-            let pair_distance = if core {
-                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
-                distance as f64 / (ncols as f64)
-            } else {
-                let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
-                1.0 - ((intersection as f64 + matches + core_genes as f64)
-                    / (union as f64 + matches + core_genes as f64))
-            };
-
-            Some(pair_distance)  // Use `filter_map` instead of `map`
-        })
-        .collect()
-}
-
-struct Population {
-    pop: Array2<u8>,
-    core : bool,
-    core_vec : Vec<Vec<u8>>,
-    core_genes : usize,
-    avg_gene_freq : f64,
-}
-
-// stacks vector of arrays into 2D array
-fn to_array2<T: Copy>(source: Vec<Array1<T>>) -> Result<Array2<T>, impl std::error::Error> {
-    let width = source.len();
-    let flattened: Array1<T> = source.into_iter().flat_map(|row| row.to_vec()).collect();
-    let height = flattened.len() / width;
-    flattened.into_shape((width, height))
-}
-
-impl Population {
-    fn new(size: usize, allele_count: usize, max_variants: u8, core : bool, avg_gene_freq: f64, rng : &mut StdRng, core_genes : usize, acc_sampling_vec: &Vec<f64>) -> Self {
-        //let mut pop = Array2::<u8>::zeros((size, allele_count));
-
-        // for multithreading
-        let _index = AtomicUsize::new(0);
-        let _update_rng = AtomicUsize::new(0);
-
-        // generate vector of vectors to hold information in
-        let start: Array1<u8> = Array1::zeros(allele_count);
-        let pop_vec: Vec<Array1<u8>> = std::iter::repeat(start)
-            .take(size)
-            .collect();
-
-        // convert vector into 2D array
-        let mut pop = to_array2(pop_vec).unwrap();
-
-        if core {
-            // ensure core is same across all isolates
-            let allele_vec: Vec<u8> = (0..allele_count)
-            .map(|_| rng.gen_range(0..max_variants)).collect();
-
-            pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
-                for j in 0..allele_count
-                {
-                    row[j] = allele_vec[j];
-                }
-            }
-            );
-        } else {            
-            let mut acc_array: Array1<u8> = Array1::zeros(allele_count);
-            for j in 0..allele_count
-            {
-                //let sample_prop = acc_sampling_vec[j];
-                let sampled_value: f64 = rng.gen();
-                acc_array[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
-            }
-
-            pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
-                
-                // let mut thread_rng = rng.clone();
-                // let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                // //let thread_index = rayon::current_thread_index();
-                // //print!("{:?} ", thread_index);
-
-                // // Jump the state of the generator for this thread
-                // for _ in 0..current_index {
-                //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                // }
-
-                // ensure all accessory genomes are identical at start
-                for j in 0..allele_count
-                {
-                    //let sample_prop = acc_sampling_vec[j];
-                    //et sampled_value: f64 = thread_rng.gen();
-                    //row[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
-                    row[j] = acc_array[j];
-                    //_update_rng.fetch_add(1, Ordering::SeqCst);
-                }
-            }
-            );
-        }
-
-        // // update rng in place
-        // let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        // //print!("{:?} ", rng_index);
-        // for _ in 0..rng_index {
-        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        // }
-
-        let core_vec: Vec<Vec<u8>> = vec![vec![1, 2, 3],
-                                          vec![0, 2, 3],
-                                          vec![0, 1, 3],
-                                          vec![0, 1, 2]];
-
-        Self {
-            pop,
-            core,
-            core_vec,
-            core_genes,
-            avg_gene_freq,
-        }
-    }
-
-    fn calc_gene_freq (&mut self) -> f64 {
-        // Calculate the proportion of 1s for each row
-        let proportions: Vec<f64> = self.pop.axis_iter(Axis(0))
-        .map(|row| {
-            let sum: usize = row.iter().map(|&x| x as usize).sum();
-            let count = row.len();
-            sum as f64 / count as f64
-        })
-        .collect();
-
-        // Sum all the elements in the vector
-        let sum: f64 = proportions.iter().sum();
-
-        // Calculate the number of elements in the vector
-        let count = proportions.len();
-
-        // Calculate the average
-        let average: f64 = sum as f64 / count as f64;
-
-        average
-    }
-
-    fn sample_indices (&mut self, rng : &mut StdRng, avg_gene_num: i32, avg_pairwise_dists : Vec<f64>) -> Vec<usize> {
-        // Calculate the proportion of 1s for each row
-        let num_genes: Vec<i32> = self.pop.axis_iter(Axis(0))
-        .map(|row| {
-            let sum: i32 = row.iter().map(|&x| x as i32).sum();
-            sum
-            //let count = row.len();
-            //sum as f64 / count as f64
-        })
-        .collect();
-
-        //println!("proportions:\n{:?}", proportions);
-
-        // Calculate the differences from avg_gene_freq
-        let differences: Vec<i32> = num_genes.iter()
-        .map(|&n_genes| (n_genes - avg_gene_num).abs())
-        .collect();
-
-        //println!("differences:\n{:?}", differences);
-
-        // Convert differences to weights (lower difference should have higher weight)
-        //let max_diff = differences.iter().cloned().fold(0./0., f64::max);
-        let mut weights: Vec<f64> = differences.iter()
-            .map(|&diff| 0.99_f64.powi(diff) ) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
-            .collect();
-
-        // update weights with average pairwise distance
-        for i in 0..weights.len()
-        {
-            weights[i] *= avg_pairwise_dists[i];
-        }
-
-        //println!("max_diff:\n{:?}", max_diff);
-        //println!("weights:\n{:?}", weights);
-
-        // Create a WeightedIndex distribution based on weights
-        let dist = WeightedIndex::new(&weights).unwrap();
-
-        // Sample rows based on the distribution
-        let sampled_indices: Vec<usize> = (0..self.pop.nrows())
-        .map(|_| dist.sample(rng))
-        .collect();
-        
-        //println!("sampled_indices:\n{:?}", sampled_indices);
-
-        sampled_indices
-    }
-
-    fn next_generation(&mut self, sample : &Vec<usize>) {
-
-        // Create a new Array2 by sampling rows from the original Array2
-        let sampled_array = sample
-            .iter()
-            .map(|&i| self.pop.slice(s![i, ..]))
-            .collect::<Vec<_>>();
-        
-        // Concatenate the sampled rows into a new Array2
-        let next_pop = ndarray::stack(Axis(0), &sampled_array).unwrap();
-
-        self.pop = next_pop;
-    }
-
-    fn mutate_alleles(&mut self, mutations : i32, rng : &mut StdRng, weighted_dist: &WeightedIndex<f32>) {
-        // index for random number generation
-        let _index = AtomicUsize::new(0);
-        let _update_rng = AtomicUsize::new(0);
-
-        let poisson = Poisson::new(mutations as f64).unwrap();
-
-        if self.core == false {
-            // generate Poisson sampler
-            self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
-                // thread-specific random number generator
-                let mut thread_rng = rng.clone();
-                let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                //let thread_index = rayon::current_thread_index();
-                //print!("{:?} ", thread_index);
-
-                // Jump the state of the generator for this thread
-                for _ in 0..current_index {
-                    thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                }
-                
-                // sample from Poisson distribution for number of sites to mutate in this isolate
-                let n_sites = poisson.sample(&mut thread_rng) as usize;
-                _update_rng.fetch_add(1, Ordering::SeqCst);
-
-                // iterate for number of mutations required to reach mutation rate
-                for _ in 0..n_sites {
-                    // sample new site to mutate
-                    let mutant_site = weighted_dist.sample(&mut thread_rng);
-                    _update_rng.fetch_add(1, Ordering::SeqCst);
-                    let value = row[mutant_site];
-                    let new_allele : u8 = if value == 0 as u8 { 1 } else { 0 };
-
-                    // set value in place
-                    row[mutant_site] = new_allele;
-                }
-            }  
-            );
-        } else {
-            self.pop.axis_iter_mut(Axis(0)).into_par_iter().for_each(|mut row| {
-                    // thread-specific random number generator
-                    let mut thread_rng = rng.clone();
-                    let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                    //let thread_index = rayon::current_thread_index();
-                    //print!("{:?} ", thread_index);
-
-                    // Jump the state of the generator for this thread
-                    for _ in 0..current_index {
-                        thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                    }
-
-                    // sample from Poisson distribution for number of sites to mutate in this isolate
-                    let n_sites = thread_rng.sample(poisson) as usize;
-                    _update_rng.fetch_add(1, Ordering::SeqCst);
-
-                    // iterate for number of mutations required to reach mutation rate
-                    for _ in 0..n_sites {
-                        // sample new site to mutate
-                        let mutant_site = weighted_dist.sample(&mut thread_rng);
-                        _update_rng.fetch_add(1, Ordering::SeqCst);
-
-                        // get possible values to mutate to, must be different from current value
-                        let value = row[mutant_site];
-                        let values = &self.core_vec[value as usize];
-
-                        // sample new allele
-                        let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
-                        _update_rng.fetch_add(1, Ordering::SeqCst);
-
-                        // set value in place
-                        row[mutant_site] = *new_allele;
-                    }
-                });
-        }
-        // update rng in place
-        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        //print!("{:?} ", rng_index);
-        for _ in 0..rng_index {
-            rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        }
-
-    }
-
-    fn recombine(&mut self, n_recombinations : f64, rng : &mut StdRng, locus_weights: &Vec<f32>) {
-        // index for random number generation
-        let _index = AtomicUsize::new(0);
-        let _update_rng = AtomicUsize::new(0);
-
-        let poisson_recomb = Poisson::new(n_recombinations as f64).unwrap();
-
-        // Preallocate results vector with one entry per row
-        //let mut loci: Vec<Vec<usize>> = vec![Vec::new(); self.pop.nrows()];
-        let loci = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
-        let values = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
-        let recipients = Arc::new(RwLock::new(vec![Vec::new(); self.pop.nrows()]));
-
-        // let contiguous_array:ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>;
-        // let matches:f64; 
-
-        // // get mutation matrix
-        // match pangenome_matrix {
-        //     Some(matrix) => {
-        //         (contiguous_array, matches) =  get_variable_loci(false, &matrix);
-        //     }
-        //     None => {
-        //         (contiguous_array, matches) =  get_variable_loci(false, &self.pop);
-        //     }
-        // }
-
-        // recipient distribution, minus one to avoid comparison with self
-        let dist: Uniform<usize> = Uniform::new(0, self.pop.nrows() - 1);
-
-        // for each genome, determine which positions are being transferred
-        self.pop.axis_iter(Axis(0)).into_par_iter().enumerate().for_each(|(row_idx , row)| {
-            //use std::time::Instant;
-            //let now = Instant::now();
-            
-            // thread-specific random number generator
-            let mut thread_rng = rng.clone();
-            let current_index = _index.fetch_add(1, Ordering::SeqCst);
-            // Jump the state of the generator for this thread
-            for _ in 0..current_index {
-                thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-            }
-            
-            // sample from Poisson distribution for number of sites to mutate in this isolate
-            let n_sites = poisson_recomb.sample(&mut thread_rng) as usize;
-            //let n_targets = poisson_recip.sample(&mut thread_rng) as usize;
-            _update_rng.fetch_add(1, Ordering::SeqCst);
-
-            // get sampling weights for each pairwise comparison
-            // TODO remove this, jsut have same distance for all individuals
-            //let binding = get_distance(row_idx, self.pop.nrows(), self.core_genes, matches, false, &contiguous_array, self.pop.ncols());
-            //let mut elapsed = now.elapsed();
-    
-            //println!("finished distances: {}, {:.2?}", row_idx, elapsed);
-            //let binding = vec![0.1; self.pop.nrows()];
-            //let i_distances = binding
-            //.iter().map(|i| {1.0 - i});
-            //let sample_dist = WeightedIndex::new(i_distances).unwrap();
-
-            //elapsed = now.elapsed();
-            //println!("finished sampling dist: {}, {:.2?}", row_idx, elapsed);
-
-            // Sample rows based on the distribution, adjusting as self comparison not conducted
-            let sampled_recipients: Vec<usize> = (0..n_sites).map(|_| dist.sample(&mut thread_rng)).map(|value| value + (value >= row_idx) as usize).collect();
-            let mut sampled_loci: Vec<usize> = Vec::with_capacity(n_sites);
-
-            // for _ in 0..n_sites {
-            //     let value = sample_dist.sample(&mut thread_rng);
-            //     sampled_recipients.push(value + (value >= row_idx) as usize);
-            // }
-
-            //elapsed = now.elapsed();
-            //println!("finished sampling total: {}, {:.2?}", row_idx, elapsed);
-
-            //let sampled_recipients: Vec<usize> = vec![1, 7, 20, 705, 256];
-
-            _update_rng.fetch_add(n_sites, Ordering::SeqCst);
-
-            let mut sampled_values: Vec<u8> = vec![1; n_sites];
-            // get non-zero indices
-            if self.core == false {
-                //if accessory, set elements with no genes to 0
-                let mut non_zero_weights: Vec<f32> = locus_weights.clone();
-                for (idx, &val) in row.indexed_iter() {
-                    if val == 0 {
-                        non_zero_weights[idx] = 0.0;
-                    }
-                }
-
-                // // get all sites to be recombined
-                // sampled_loci = (0..n_sites)
-                // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
-                // .collect();
-                
-                let locus_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(non_zero_weights).unwrap();
-
-                // iterate for number of mutations required to reach mutation rate, include deletions and insertions
-                sampled_loci = thread_rng
-                    .sample_iter(locus_weighted_dist)
-                    .take(n_sites)
-                    .collect();
-
-            } else {
-                
-                // sampled_loci = (0..n_sites)
-                // .map(|_| row.indexed_iter().map(|(idx, _)| idx).choose(&mut thread_rng).unwrap()) // Sample with replacement
-                // .collect();
-
-                sampled_loci = thread_rng
-                    .sample_iter(rand::distributions::Uniform::new(0, self.pop.ncols()))
-                    .take(n_sites)
-                    .collect();
-
-                // assign site value from row
-                for site in 0..n_sites {
-                    sampled_values[site] = row[sampled_loci[site]];
-                }
-            }
-
-            //elapsed = now.elapsed();
-            //println!("finished getting sites total: {}, {:.2?}", row_idx, elapsed);
-
-            // update the rng
-            _update_rng.fetch_add(n_sites, Ordering::SeqCst);
-
-            // assign values
-            {
-                let mut mutex = loci.write().unwrap();  // Lock for writing
-                let entry = &mut mutex[row_idx];  // Now you can index safely
-                *entry = sampled_loci;
-            }
-            {
-                let mut mutex = values.write().unwrap();  // Lock for writing
-                let entry = &mut mutex[row_idx];  // Now you can index safely
-                *entry = sampled_values;
-            }
-            {
-                let mut mutex = recipients.write().unwrap();  // Lock for writing
-                let entry = &mut mutex[row_idx];  // Now you can index safely
-                *entry = sampled_recipients;
-            }
-
-            //elapsed = now.elapsed();
-            //println!("finished entering data: {}, {:.2?}", row_idx, elapsed);
-        }  
-        );
-
-        // update rng in place
-        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        //print!("{:?} ", rng_index);
-        for _ in 0..rng_index {
-            rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        }
-
-        // go through entries in loci, values and recipients, mutating the rows in each case
-        // randomise order in which rows are moved through 
-        let mut row_indices: Vec<usize> = (0..self.pop.nrows()).collect();
-        row_indices.shuffle(rng);
-
-        for pop_idx in row_indices
-        {
-            // sample for given donor
-            let sampled_loci: Vec<usize> = loci.write().unwrap()[pop_idx].to_vec();
-            let sampled_recipients: Vec<usize> = recipients.write().unwrap()[pop_idx].to_vec();
-            let sampled_values: Vec<u8> = values.write().unwrap()[pop_idx].to_vec();
-
-            // println!("index: {}", pop_idx);
-            // println!("sampled_loci: {:?}", sampled_loci);
-            // println!("sampled_recipients: {:?}", sampled_recipients);
-            // println!("sampled_values: {:?}", sampled_values);
-
-            // update recipients in place
-            // TODO merge all changes to each recipient, make multithreaded
-            Zip::from(&sampled_recipients)
-            .and(&sampled_loci)
-            .and(&sampled_values)
-            .for_each(|&row_idx, &col_idx, &value| {
-                self.pop[[row_idx, col_idx]] = value;
-            });
-        }
-
-    }
-
-    fn average_distance(&mut self) -> Vec<f64> {
-        let (contiguous_array, matches) =  get_variable_loci(self.core, &self.pop);
-        
-        let range = 0..self.pop.nrows();
-        let distances: Vec<f64> = range.into_par_iter().map(|i| {
-
-            let i_distances = get_distance(i, self.pop.nrows(), self.core_genes, matches, self.core, &contiguous_array, self.pop.ncols());
-            
-            let mut _final_distance = i_distances.iter().sum::<f64>() / i_distances.len() as f64;
-            
-            // ensure no zero distances that may cause no selection of isolates.
-            if _final_distance == 0.0
-            {
-                _final_distance = MIN_POSITIVE;
-            }
-
-            _final_distance
-        }).collect();
-
-        //println!("new distances:\n{:?}", distances);
-        distances
-        }
-
-    fn pairwise_distances(&mut self, max_distances : usize, range1: &Vec<usize>, range2: &Vec<usize>) -> Vec<f64> {
-        let (contiguous_array, matches) =  get_variable_loci(self.core, &self.pop);
-
-        //let mut idx = 0;
-        let range = 0..max_distances;
-        let distances: Vec<_> = range.into_par_iter().map(|current_index| {
-            let i = range1[current_index];
-            let j = range2[current_index];
-
-            //println!("i:\n{:?}", i);
-            //println!("j:\n{:?}", j);
-            
-            let row1 = contiguous_array.index_axis(Axis(0), i);
-            let row2 = contiguous_array.index_axis(Axis(0), j);
-            let row1_slice = row1.as_slice().unwrap().to_vec();
-            let row2_slice = row2.as_slice().unwrap().to_vec(); 
-
-            //println!("rowi:\n{:?}", row1);
-            //println!("rowj:\n{:?}", row2);
-
-            let mut _final_distance: f64 = 0.0;
-
-            if self.core == true {
-                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap();
-                _final_distance = distance as f64 / (self.pop.ncols() as f64);
-            } else {
-                let (intersection, union) = jaccard_distance(&row1_slice, &row2_slice);
-                _final_distance = 1.0 - ((intersection as f64 + matches + self.core_genes as f64) / (union as f64 + matches + self.core_genes as f64));
-            }
-            //println!("_final_distance:\n{:?}", _final_distance);
-            _final_distance
-        }).collect();
-        distances
-        }
-}
 
 fn main() -> io::Result<()> {
-
     // Define the command-line arguments using clap
     let matches = Command::new("pansim")
     .version("0.0.2")
@@ -710,21 +73,37 @@ fn main() -> io::Result<()> {
         .help("Adds competition based on average pairwise genome distance.")
         .required(false)
         .takes_value(false))
-    .arg(Arg::new("pan_mu")
-        .long("pan_mu")
-        .help("Maximum average pairwise pangenome distance to achieve by end of simulation.")
+    .arg(Arg::new("rate_genes1")
+        .long("rate_genes1")
+        .help("Average number of accessory pangenome that mutates per generation in gene compartment 1. Must be >= 0.0")
         .required(false)
-        .default_value("0.2"))
-    .arg(Arg::new("proportion_fast")
-        .long("proportion_fast")
-        .help("Proportion of genes in pangenome in fast compartment.")
+        .default_value("10.0"))
+    .arg(Arg::new("rate_genes2")
+        .long("rate_genes2")
+        .help("Average number of accessory pangenome that mutates per generation in gene compartment 2. Must be >= 0.0")
+        .required(false)
+        .default_value("10.0"))
+    .arg(Arg::new("prop_genes2")
+        .long("prop_genes2")
+        .help("Proportion of pangenome made up of compartment 2 genes. Must be 0.0 <= X <= 1.0")
+        .required(false)
+        .default_value("0.1"))
+    .arg(Arg::new("prop_positive")
+        .long("prop_positive")
+        .help("Proportion of pangenome made up of positively selected genes. Must be 0.0 <= X <= 1.0. If negative, neutral selection is simulated.")
         .required(false)
         .default_value("0.5"))
-    .arg(Arg::new("speed_fast")
-        .long("speed_fast")
-        .help("Proportional difference in speed of mutation between slow and fast genes. Must be >=1.0.")
+        .allow_hyphen_values(true)
+    .arg(Arg::new("pos_lambda")
+        .long("pos_lambda")
+        .help("Lambda value for exponential distribution of positively selected genes. Must be > 0.0")
         .required(false)
-        .default_value("2.0"))
+        .default_value("0.1"))
+    .arg(Arg::new("neg_lambda")
+        .long("neg_lambda")
+        .help("Lambda value for exponential distribution of negatively selected genes. Must be > 0.0.")
+        .required(false)
+        .default_value("0.1"))
     .arg(Arg::new("seed")
         .long("seed")
         .help("Seed for random number generation.")
@@ -740,6 +119,11 @@ fn main() -> io::Result<()> {
         .required(false)
         .takes_value(false))
         .help("Print per-generation average pairwise distances.")
+    .arg(Arg::new("print_matrices")
+        .long("print_matrices")
+        .required(false)
+        .takes_value(false))
+        .help("Prints core and accessory matrices.")
     .arg(Arg::new("threads")
         .long("threads")
         .help("Number of threads.")
@@ -750,6 +134,21 @@ fn main() -> io::Result<()> {
         .help("Prints generation and time to completion")
         .required(false)
         .takes_value(false))
+    .arg(Arg::new("no_control_genome_size")
+        .long("no_control_genome_size")
+        .help("Removes penalisation of genome sizes deviating from average.")
+        .required(false)
+        .takes_value(false))
+    .arg(Arg::new("genome_size_penalty")
+        .long("genome_size_penalty")
+        .help("Multiplier for each gene difference between avg_gene_freq and observed value. Default = 0.99")
+        .required(false)
+        .default_value("0.99"))
+    .arg(Arg::new("competition_strength")
+        .long("competition_strength")
+        .help("Strength of competition felt by strain to all others. Default = 1.0")
+        .required(false)
+        .default_value("1.0"))
     .get_matches();
 
     // Set the argument to a variable
@@ -764,14 +163,21 @@ fn main() -> io::Result<()> {
     let outpref = matches.value_of("outpref").unwrap_or("distances");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
     let core_mu: f64 = matches.value_of_t("core_mu").unwrap();
-    let pan_mu: f64 = matches.value_of_t("pan_mu").unwrap();
-    let proportion_fast: f32 = matches.value_of_t("proportion_fast").unwrap();
-    let speed_fast: f32 = matches.value_of_t("speed_fast").unwrap();
+    let rate_genes1: f64 = matches.value_of_t("rate_genes1").unwrap();
+    let rate_genes2: f64 = matches.value_of_t("rate_genes2").unwrap();
+    let prop_genes2: f64 = matches.value_of_t("prop_genes2").unwrap();
+    let prop_positive: f64 = matches.value_of_t("prop_positive").unwrap();
+    let pos_lambda: f64 = matches.value_of_t("pos_lambda").unwrap();
+    let neg_lambda: f64 = matches.value_of_t("neg_lambda").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
     let competition = matches.is_present("competition");
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
+    let print_matrices: bool = matches.is_present("print_matrices");
+    let no_control_genome_size: bool = matches.is_present("no_control_genome_size");
+    let genome_size_penalty: f64 = matches.value_of_t("genome_size_penalty").unwrap();
+    let competition_strength: f64 = matches.value_of_t("competition_strength").unwrap();
 
     //let verbose = true;
 
@@ -782,26 +188,34 @@ fn main() -> io::Result<()> {
     // validate all variables
     if core_genes > pan_genes {
         println!("core_genes must be less than or equal to pan_size");
-        return Ok(())
+        return Ok(());
     }
 
     if (HR_rate < 0.0 || HGT_rate < 0.0) {
         println!("HR_rate and HGT_rate must be above 0.0");
         println!("HR_rate: {}", HR_rate);
         println!("HGT_rate: {}", HGT_rate);
-        return Ok(())
+        return Ok(());
     }
 
-    if (proportion_fast < 0.0) || (proportion_fast > 1.0) {
-        println!("proportion_fast must be between 0.0 and 1.0");
-        println!("proportion_fast: {}", proportion_fast);
-        return Ok(())
+    if (pos_lambda <= 0.0 || neg_lambda <= 0.0) {
+        println!("pos_lambda and neg_lambda must be above 0.0");
+        println!("pos_lambda: {}", pos_lambda);
+        println!("neg_lambda: {}", neg_lambda);
+        return Ok(());
     }
 
-    if speed_fast < 1.0 {
-        println!("speed_fast must be above 1.0");
-        println!("speed_fast: {}", speed_fast);
-        return Ok(())
+    if rate_genes1 < 0.0 || rate_genes2 < 0.0 {
+        println!("rate_genes1 and rate_genes2 must be >= 0");
+        println!("rate_genes1: {}", rate_genes1);
+        println!("rate_genes2: {}", rate_genes2);
+        return Ok(());
+    }
+
+    if prop_genes2 < 0.0 || prop_genes2 > 1.0 {
+        println!("prop_genes2 must be 0.0 <= prop_genes2 <= 1.0");
+        println!("prop_genes2: {}", prop_genes2);
+        return Ok(());
     }
 
     if (pop_size < 1) || (core_size < 1) || (pan_genes < 1) || (n_gen < 1) || (max_distances < 1) {
@@ -811,41 +225,37 @@ fn main() -> io::Result<()> {
         println!("pan_genes: {}", pan_genes);
         println!("n_gen: {}", n_gen);
         println!("max_distances: {}", max_distances);
-        return Ok(())
+        return Ok(());
     }
 
     if (core_mu < 0.0) || (core_mu > 1.0) {
         println!("core_mu must be between 0.0 and 1.0");
         println!("core_mu: {}", core_mu);
-        return Ok(())
-    }
-
-    if (pan_mu < 0.0) || (pan_mu > 1.0) {
-        println!("pan_mu must be between 0.0 and 1.0");
-        println!("pan_mu: {}", pan_mu);
-        return Ok(())
+        return Ok(());
     }
 
     if (avg_gene_freq <= 0.0) || (avg_gene_freq > 1.0) {
         println!("avg_gene_freq must be above 0.0 and below or equal to 1.0");
         println!("avg_gene_freq: {}", avg_gene_freq);
-        return Ok(())
+        return Ok(());
     }
-
 
     if n_threads < 1 {
         n_threads = 1;
     }
 
     // enable multithreading
-    rayon::ThreadPoolBuilder::new().num_threads(n_threads).build_global().unwrap();
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(n_threads)
+        .build_global()
+        .unwrap();
 
     let pan_size = pan_genes - core_genes;
 
     // adjust avg_gene_freq by size of core genome
     // determine proportion of accessory genome that should be present on average
-    let core_prop : f64 = core_genes as f64 / pan_genes as f64;
-    let acc_prop : f64 = 1.0 - core_prop;
+    let core_prop: f64 = core_genes as f64 / pan_genes as f64;
+    let acc_prop: f64 = 1.0 - core_prop;
     avg_gene_freq = (avg_gene_freq - core_prop) / acc_prop;
     if avg_gene_freq < 0.0 {
         avg_gene_freq = 0.0;
@@ -854,36 +264,122 @@ fn main() -> io::Result<()> {
         println!("avg_gene_freq adjusted to {}", avg_gene_freq);
     }
     let avg_gene_num: i32 = (avg_gene_freq * pan_size as f64).round() as i32;
-    
+
     // calculate number of mutations per genome per generation, should this be whole pangenome or just accessory genes?
-    let n_core_mutations = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() ;
-    let n_pan_mutations = (((pan_size as f64 * pan_mu) / n_gen as f64) / 2.0).ceil();
+    let n_core_mutations =
+        vec![(((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() as f64];
 
     // calculate average recombinations per genome
-    let n_recombinations_core: f64 = ((n_core_mutations as f64 * HR_rate)).round();
-    let n_recombinations_pan: f64 = ((n_core_mutations as f64 * HGT_rate)).round();
+    let n_recombinations_core: Vec<f64> = vec![(n_core_mutations[0] as f64 * HR_rate).round()];
+    let n_recombinations_pan_total = (n_core_mutations[0] as f64 * HGT_rate).round();
+    let mut n_recombinations_pan: Vec<f64> = vec![];
 
     // set weights for sampling of sites
-    let core_weights : Vec<f32> = vec![1.0; core_size];
-    let mut pan_weights : Vec<f32> = vec![1.0; pan_size];
-
-    // calculate sites for fast accessory genome
-    let num_fast_sites = (pan_size as f32 * proportion_fast).round() as usize;
-    for i in 0..num_fast_sites {
-        pan_weights[i] = speed_fast;
-    }
+    let core_weights: Vec<Vec<f32>> = vec![vec![1.0; core_size]; 1];
+    let mut pan_weights: Vec<Vec<f32>> = vec![];
+    let mut n_pan_mutations: Vec<f64> = vec![];
+    let mut selection_weights: Vec<f64> = vec![0.0; pan_size];
 
     let mut rng: StdRng = StdRng::seed_from_u64(seed);
+    
+    // calculate selection weights for each gene
+    if prop_positive >= 0.0 {
+        let uniform: Uniform<f64> = Uniform::new(0.0, 1.0);
+        let exponential_pos: Exp = Exp::new(pos_lambda).unwrap();
+        let exponential_neg: Exp = Exp::new(neg_lambda).unwrap();
+        
+        for i in 0..pan_size {
+            let weight: f64 = uniform.sample(&mut rng) as f64;
+
+            let mut selection_coeffient: f64 = 0.0;
+
+            // positively selected gene
+            if weight <= prop_positive {
+                selection_coeffient = exponential_pos.sample(&mut rng);
+                //selection_coeffient = 100.0;
+            } else {
+                selection_coeffient = exponential_neg.sample(&mut rng);
+
+                while selection_coeffient > 1.0 {
+                    selection_coeffient = exponential_neg.sample(&mut rng);
+                }
+                // if selection_coeffient > 1.0 {
+                //     selection_coeffient = 1.0;
+                // }
+                selection_coeffient = -1.0 * selection_coeffient;
+            }
+            selection_weights[i] = selection_coeffient;
+        }
+    }
+
+    // calculate sites for fast accessory genome
+    let num_gene1_sites = (pan_size as f64 * (1.0 - prop_genes2)).round() as usize;
+    let prop_gene1_sites: f64 = num_gene1_sites as f64 / pan_size as f64;
+    let prop_gene2_sites: f64 = 1.0 - prop_gene1_sites;
+
+    // create weights for either rate compartments
+    // for gene rate 1 if any exist, otherwise don't add
+    if num_gene1_sites > 0 {
+        let mut pan_weights_1: Vec<f32> = vec![0.0; pan_size];
+        for i in 0..num_gene1_sites {
+            pan_weights_1[i] = 1.0;
+        }
+        pan_weights.push(pan_weights_1);
+        n_pan_mutations.push(rate_genes1);
+        let n_recombinations_pan_gene1 =
+            n_recombinations_pan_total * prop_gene1_sites; //(rate_genes1 / (rate_genes1 + rate_genes2));
+        n_recombinations_pan.push(n_recombinations_pan_gene1);
+    } 
+    
+    // gene 2 rates of mutation and HGT, if any genes exist, otherwise don't add
+    if num_gene1_sites < pan_size {
+        let mut pan_weights_2: Vec<f32> = vec![0.0; pan_size];
+        for i in num_gene1_sites..pan_size {
+            pan_weights_2[i] = 1.0;
+        }
+        n_pan_mutations.push(rate_genes2);
+        pan_weights.push(pan_weights_2);
+
+        let n_recombinations_pan_gene2 =
+            n_recombinations_pan_total * prop_gene2_sites; //(rate_genes2 / (rate_genes1 + rate_genes2));
+        n_recombinations_pan.push(n_recombinations_pan_gene2);
+    }
 
     // generate sampling distribution for genes in accessory genome
     let acc_sampling_vec = sample_beta(pan_size, &mut rng);
 
-    let mut core_genome = Population::new(pop_size, core_size, 4, true, avg_gene_freq, &mut rng, core_genes, & acc_sampling_vec); // core genome alignment
-    let mut pan_genome = Population::new(pop_size, pan_size, 2, false, avg_gene_freq, &mut rng, core_genes, & acc_sampling_vec); // pangenome alignment
+    let mut core_genome = Population::new(
+        pop_size,
+        core_size,
+        4,
+        true,
+        avg_gene_freq,
+        &mut rng,
+        core_genes,
+        &acc_sampling_vec,
+    ); // core genome alignment
+    let mut pan_genome = Population::new(
+        pop_size,
+        pan_size,
+        2,
+        false,
+        avg_gene_freq,
+        &mut rng,
+        core_genes,
+        &acc_sampling_vec,
+    ); // pangenome alignment
 
     // weighted distribution samplers
-    let core_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(core_weights.clone()).unwrap();
-    let pan_weighted_dist: WeightedIndex<f32> = WeightedIndex::new(pan_weights.clone()).unwrap();
+    let core_weighted_dist: Vec<WeightedIndex<f32>> = core_weights
+        .clone()
+        .into_iter()
+        .map(|dist| WeightedIndex::new(dist.clone()).unwrap())
+        .collect();
+    let pan_weighted_dist: Vec<WeightedIndex<f32>> = pan_weights
+        .clone()
+        .into_iter()
+        .map(|dist| WeightedIndex::new(dist.clone()).unwrap())
+        .collect();
 
     // hold pairwise core and accessory distances per generation
     let mut avg_acc_dist = vec![0.0; n_gen as usize];
@@ -891,66 +387,64 @@ fn main() -> io::Result<()> {
     let mut std_acc_dist = vec![0.0; n_gen as usize];
     let mut std_core_dist = vec![0.0; n_gen as usize];
 
-
     // generate random numbers to sample indices
     // TODO make it so that equivalent distances aren't sample, sample with replacement from one?
-    let range1: Vec<usize> = (0..max_distances).map(|_| rng.gen_range(0..pop_size)).collect();
+    let range1: Vec<usize> = (0..max_distances)
+        .map(|_| rng.gen_range(0..pop_size))
+        .collect();
     let mut range2: Vec<usize> = vec![0; max_distances];
 
     let mut i2 = 0;
     // sample same range, ensure self-comparisons not included
     for i1 in range1.clone() {
         let mut entry = rng.gen_range(0..pop_size - 1);
-        if entry >= i1 {entry += 1};
+        if entry >= i1 {
+            entry += 1
+        };
         range2[i2] = entry;
         i2 += 1;
     }
-    
-    for j in 0..n_gen { // Run for n_gen generations
+
+    for j in 0..n_gen {
+        // Run for n_gen generations
         //let now_gen = Instant::now();
-        
-        // sample new individuals if not at first generation
-        if j > 0 {
-            //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
-            let mut avg_pairwise_dists = vec![1.0; pop_size];
-            
-            // include competition
-            if competition == true
-            {
-                avg_pairwise_dists = pan_genome.average_distance();
-            }
-            
-            let sampled_individuals = pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists);
-            core_genome.next_generation(& sampled_individuals);
-            //println!("finished copying core genome {}", j);
-            pan_genome.next_generation(& sampled_individuals);
-            //println!("finished copying pangenome {}", j);
+
+        // mutate core genome
+        //println!("started {}", j);
+        core_genome.mutate_alleles(&n_core_mutations, &mut rng, &core_weighted_dist);
+
+        //println!("finished mutating core genome {}", j);
+        pan_genome.mutate_alleles(&n_pan_mutations, &mut rng, &pan_weighted_dist);
+        //println!("finished mutating pangenome {}", j);
+
+        // recombine populations
+        if HR_rate > 0.0 {
+            core_genome.recombine(&n_recombinations_core, &mut rng, &core_weights);
         }
+        if HGT_rate > 0.0 {
+            pan_genome.recombine(&n_recombinations_pan, &mut rng, &pan_weights);
+        }
+
+        // sample new individuals
+        //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
+        let mut avg_pairwise_dists = vec![1.0; pop_size];
+
+        // include competition
+        if competition == true {
+            avg_pairwise_dists = pan_genome.average_distance();
+        }
+
+        let sampled_individuals =
+            pan_genome.sample_indices(&mut rng, avg_gene_num, avg_pairwise_dists, &selection_weights, verbose, no_control_genome_size, genome_size_penalty, competition_strength);
         
-        // if at final generation, just sample, otherwise mutate
-        if j < (n_gen - 1) {
-            // mutate core genome
-            //println!("started {}", j);
-            core_genome.mutate_alleles(n_core_mutations as i32, &mut rng, &core_weighted_dist);
+        core_genome.next_generation(&sampled_individuals);
+        //println!("finished copying core genome {}", j);
+        pan_genome.next_generation(&sampled_individuals);
+        //println!("finished copying pangenome {}", j);
+        
+        // if at final generation, sample
+        if j == n_gen -1 {
 
-            //println!("finished mutating core genome {}", j);
-            pan_genome.mutate_alleles(n_pan_mutations as i32, &mut rng, &pan_weighted_dist);
-            //println!("finished mutating pangenome {}", j);
-
-            // recombine populations
-            if HR_rate > 0.0 {
-                core_genome.recombine(n_recombinations_core, &mut rng, &core_weights);
-            }
-            if HGT_rate > 0.0 {
-                pan_genome.recombine(n_recombinations_pan, &mut rng, &pan_weights);
-            }
-
-        } else {
-            let final_avg_gene_freq = pan_genome.calc_gene_freq();
-            if verbose {
-                println!("final avg_gene_freq: {}", final_avg_gene_freq);
-            }
-            
             // else calculate hamming and jaccard distances
             let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
             let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
@@ -974,11 +468,11 @@ fn main() -> io::Result<()> {
             let mut std_core = 0.0;
             let mut avg_core = 0.0;
             (std_core, avg_core) = standard_deviation(&core_distances);
-            
+
             let mut std_acc = 0.0;
             let mut avg_acc = 0.0;
             (std_acc, avg_acc) = standard_deviation(&acc_distances);
-            
+
             avg_core_dist[j as usize] = avg_core;
             avg_acc_dist[j as usize] = avg_acc;
 
@@ -988,7 +482,9 @@ fn main() -> io::Result<()> {
 
         //let elapsed = now_gen.elapsed();
         if verbose {
-            println!("Finished gen: {}", j + 1);    
+            println!("Finished gen: {}", j + 1);
+            let avg_gene_freq = pan_genome.calc_gene_freq();
+            println!("avg_gene_freq: {}", avg_gene_freq);
         }
         //println!("Elapsed: {:.2?}", elapsed);
     }
@@ -1002,18 +498,29 @@ fn main() -> io::Result<()> {
         let mut file = File::create(output_file)?;
 
         // Iterate through the vectors and write each pair to the file
-        for (avg_core, avg_acc, std_core, std_acc) in avg_core_dist.iter().zip(avg_acc_dist.iter()).zip(std_core_dist.iter()).zip(std_acc_dist.iter()).map(|(((w, x), y), z)| (w, x, y, z)) {
+        for (avg_core, avg_acc, std_core, std_acc) in avg_core_dist
+            .iter()
+            .zip(avg_acc_dist.iter())
+            .zip(std_core_dist.iter())
+            .zip(std_acc_dist.iter())
+            .map(|(((w, x), y), z)| (w, x, y, z))
+        {
             writeln!(file, "{}\t{}\t{}\t{}", avg_core, std_core, avg_acc, std_acc);
         }
     }
 
+    if print_matrices {
+        core_genome.write(outpref);
+        pan_genome.write(outpref);
+    }
+
     //let elapsed = now.elapsed();
-    
+
     // if verbose {
     //     println!("Total elapsed: {:.2?}", elapsed);
     // }
 
     // println!("Total elapsed: {:.2?}", elapsed);
 
-    return Ok(())
+    return Ok(());
 }
