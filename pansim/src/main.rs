@@ -30,7 +30,7 @@ use std::usize;
 
 use logsumexp::LogSumExp;
 
-// from https://github.com/emschwartz/hamming-bitwise-fast/tree/main
+// Copyright 2024 Evan Schwartz from https://github.com/emschwartz/hamming-bitwise-fast/tree/main
 pub fn hamming_bitwise_fast(x: &[u8], y: &[u8]) -> u32 {
     assert_eq!(x.len(), y.len());
 
