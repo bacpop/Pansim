@@ -1,17 +1,29 @@
 library(ggplot2)
 
 #plot pairwise distances
-filename <- "pan_mu_0.35_prop_1.0_recomb_0.0_competition_false"
-df <- read.csv(paste("gridsearch/original_run/", filename, ".tsv", sep = ""), sep = "\t", header = FALSE)
-colnames(df) <- c("Core", "Accessory")
+#filename <- "pan_mu_0.05_core_mu_0.019_prop_0.1_recomb_0.0_competition_true"
+in_dir <- "gridsearch/commit_996b2e4/files/"
+out_dir <- "gridsearch/commit_996b2e4/figures/"
+filenames <- list.files(path = in_dir, pattern = "\\.tsv$")
 
-p <- ggplot(df, aes(x = Core, y = Accessory)) + geom_point(alpha=0.2, colour="#0c589c") +
-  labs(x = "Core", y = "Accessory") +
-  theme_light() +
-  theme(axis.title = element_text(size=20), axis.text = element_text(size=18))
-p
 
-ggsave(paste("ngen100_npop1000_", filneame, ".png", sep = ""))
+for (filename in filenames)
+{
+  filename <- "pansim/distances.tsv"
+  in_dir <- ""
+  out_dir <- ""
+  df <- read.csv(paste(in_dir, filename, sep = ""), sep = "\t", header = FALSE)
+  colnames(df) <- c("Core", "Accessory")
+  
+  p <- ggplot(df, aes(x = Core, y = Accessory)) + geom_point(alpha=0.2, colour="#0c589c") +
+    labs(x = "Core", y = "Accessory") +
+    theme_light() +
+    theme(axis.title = element_text(size=20), axis.text = element_text(size=18))
+  p
+  
+  prefix <- sub(pattern = "(.*)\\..*$", replacement = "\\1", filename)
+  ggsave(paste(out_dir, "ngen100_npop1000_", prefix, ".png", sep = ""))
+}
 
 # plot change in average pairwise distance
 df <- read.csv("pansim/default_same_start_ngen_500_popsize_2000_per_gen.tsv", sep = "\t", header = FALSE)
