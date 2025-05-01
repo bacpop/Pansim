@@ -30,6 +30,38 @@ use std::usize;
 
 use logsumexp::LogSumExp;
 
+// from https://github.com/emschwartz/hamming-bitwise-fast/tree/main
+pub fn hamming_bitwise_fast(x: &[u8], y: &[u8]) -> u32 {
+    assert_eq!(x.len(), y.len());
+
+    // Process 8 bytes at a time using u64
+    let mut distance = x
+        .chunks_exact(8)
+        .zip(y.chunks_exact(8))
+        .map(|(x_chunk, y_chunk)| {
+            // This is safe because we know the chunks are exactly 8 bytes.
+            // Also, we don't care whether the platform uses little-endian or big-endian
+            // byte order. Since we're only XORing values, we just care that the
+            // endianness is the same for both.
+            let x_val = u64::from_ne_bytes(x_chunk.try_into().unwrap());
+            let y_val = u64::from_ne_bytes(y_chunk.try_into().unwrap());
+            (x_val ^ y_val).count_ones()
+        })
+        .sum::<u32>();
+
+    if x.len() % 8 != 0 {
+        distance += x
+            .chunks_exact(8)
+            .remainder()
+            .iter()
+            .zip(y.chunks_exact(8).remainder())
+            .map(|(x_byte, y_byte)| (x_byte ^ y_byte).count_ones())
+            .sum::<u32>();
+    }
+
+    distance
+}
+
 fn jaccard_distance(row1: &[u8], row2: &[u8]) -> (usize, usize) {
     assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
 
@@ -136,7 +168,7 @@ fn get_distance(
     ncols: usize,
 ) -> Vec<f64> {
     let row1 = contiguous_array.index_axis(Axis(0), i);
-    let row1_slice = row1.as_slice().unwrap().to_vec(); // Avoid multiple calls
+    let row1_slice = row1.as_slice().unwrap(); // Avoid multiple calls
 
     (0..nrows)
         .filter_map(|j| {
@@ -145,14 +177,12 @@ fn get_distance(
             }
 
             let row2 = contiguous_array.index_axis(Axis(0), j);
+            let row2_slice = row2.as_slice().unwrap(); // Single call
 
             let pair_distance = if core {
-                let row2_slice = row2.as_slice().unwrap().to_vec(); // Single call
-                
-                let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap() / 2;
+                let distance = hamming_bitwise_fast(row1_slice, row2_slice) / 2;
                 distance as f64 / (ncols as f64)
             } else {
-                let row2_slice = row2.as_slice().unwrap(); // Single call
                 
                 let (intersection, union) = jaccard_distance(&row1_slice, row2_slice);
                 1.0 - ((intersection as f64 + matches + core_genes as f64)
@@ -687,7 +717,7 @@ impl Population {
                         // // get all sites to be recombined
                         // sampled_loci = (0..n_sites)
                         // .map(|_| *non_zero_indices.choose(&mut thread_rng).unwrap()) // Sample with replacement
-                        // .collect();
+                        // .collect(); 
                         
                         //let sum : f32 = non_zero_weights.clone().iter().sum();
                         // if sum == 0.0 {
@@ -838,6 +868,10 @@ impl Population {
                 let i = range1[current_index];
                 let j = range2[current_index];
 
+                let row1 = contiguous_array.index_axis(Axis(0), i);
+                let row2 = contiguous_array.index_axis(Axis(0), j);
+                let row1_slice = row1.as_slice().unwrap();
+                let row2_slice = row2.as_slice().unwrap();
                 //println!("i: {:?}", i);
                 //println!("j: {:?}", j);
 
@@ -847,19 +881,14 @@ impl Population {
                 let mut _final_distance: f64 = 0.0;
 
                 if self.core == true {
-                    let row1 = contiguous_array.index_axis(Axis(0), i);
-                    let row2 = contiguous_array.index_axis(Axis(0), j);
-                    let row1_slice = row1.as_slice().unwrap().to_vec();
-                    let row2_slice = row2.as_slice().unwrap().to_vec();
                     
-                    let distance = hamming::distance_fast(&row1_slice, &row2_slice).unwrap() / 2;
+                    let distance = hamming_bitwise_fast(row1_slice, row2_slice) / 2;
+           
+                    // let test_distance = row1_slice.to_vec().iter().zip(&row2_slice.to_vec()).filter(|&(a, b)| a != b).count();
+                    // println!("distance: {:?} test_distance: {:?}", distance, test_distance);
+
                     _final_distance = distance as f64 / (self.pop.ncols() as f64);
                 } else {
-                    let row1 = contiguous_array.index_axis(Axis(0), i);
-                    let row2 = contiguous_array.index_axis(Axis(0), j);
-                    let row1_slice = row1.as_slice().unwrap();
-                    let row2_slice = row2.as_slice().unwrap();
-
                     let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
                     _final_distance = 1.0
                         - ((intersection as f64 + matches + self.core_genes as f64)
