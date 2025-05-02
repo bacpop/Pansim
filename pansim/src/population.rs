@@ -455,15 +455,19 @@ impl Population {
     }
 
     pub fn next_generation(&mut self, sample: &Vec<usize>) {
-        // Create a new Array2 by sampling rows from the original Array2
-        let sampled_array = sample
-            .iter()
-            .map(|&i| self.pop.slice(s![i, ..]))
-            .collect::<Vec<_>>();
-
-        // Concatenate the sampled rows into a new Array2
-        let next_pop = ndarray::stack(Axis(0), &sampled_array).unwrap();
-
+        let nrows = sample.len();
+        let ncols = self.pop.ncols();
+    
+        // Pre-allocate the new population array
+        let mut next_pop = Array2::zeros((nrows, ncols));
+    
+        // Fill in each row directly
+        for (row_idx, &sample_idx) in sample.iter().enumerate() {
+            let source_row = self.pop.slice(s![sample_idx, ..]);
+            let mut target_row = next_pop.slice_mut(s![row_idx, ..]);
+            target_row.assign(&source_row);
+        }
+    
         self.pop = next_pop;
     }
 
