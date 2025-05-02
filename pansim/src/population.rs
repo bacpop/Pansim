@@ -28,25 +28,34 @@ use std::io::{self, Write};
 
 use std::usize;
 
+#[inline(always)]
 fn jaccard_distance(v1: &[u8], v2: &[u8]) -> (u32, u32) {
-    assert_eq!(v1.len(), v2.len(), "Vectors must have the same length.");
+    assert_eq!(v1.len(), v2.len());
 
-    let mut intersection = 0u8;
-    let mut union = 0u8;
-
-    // Loop through each element and compute intersection and union
-    for (a, b) in v1.iter().zip(v2.iter()) {
-        intersection |= a & b; // Bitwise AND for intersection
-        union |= a | b;        // Bitwise OR for union
-    }
-
-    // Count the number of set bits in intersection and union
-    let intersection_count: u32 = intersection.count_ones();
-    let union_count = union.count_ones();
-
-    // Jaccard distance: 1 - (intersection / union)
-    (intersection_count, union_count)
+    v1.iter()
+      .zip(v2.iter())
+      .fold((0, 0), |(intersection, union), (&a, &b)| {
+          (intersection + (a & b).count_ones(), union + (a | b).count_ones())
+      })
 }
+
+// fn jaccard_distance_test(v1: &[u8], v2: &[u8]) -> (u32, u32) {
+//     assert_eq!(v1.len(), v2.len(), "Vectors must have the same length.");
+
+//     let mut intersection: u32 = 0;
+//     let mut union: u32 = 0;
+
+
+//     for (&x, &y) in v1.iter().zip(v2.iter()) {
+//         if x == 1 || y == 1 {
+//             union += 1;
+//             if x == 1 && y == 1 {
+//                 intersection += 1;
+//             }
+//         }
+//     }
+//     (intersection, union)
+// }
 
 fn average(numbers: &[f64]) -> f64 {
     numbers.iter().sum::<f64>() as f64 / numbers.len() as f64
@@ -106,6 +115,9 @@ fn get_distance(
             } else {
                 
                 let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
+                // let (intersection_test, union_test) = jaccard_distance_test(row1_slice, row2_slice);
+                // println!("intersection_test: {:?} intersection: {:?}", intersection_test, intersection);
+                // println!("union_test: {:?} union: {:?}", union_test, union);
                 1.0 - ((intersection as f64 + matches + core_genes as f64)
                     / (union as f64 + matches + core_genes as f64))
             };
@@ -174,7 +186,7 @@ impl Population {
                 .collect();
 
             pop.axis_iter_mut(Axis(0))
-                .into_iter()
+                .into_par_iter()
                 .for_each(|mut row| {
                     for j in 0..allele_count {
                         row[j] = allele_vec[j];
@@ -189,7 +201,7 @@ impl Population {
             }
 
             pop.axis_iter_mut(Axis(0))
-                .into_iter()
+                .into_par_iter()
                 .for_each(|mut row| {
                     // let mut thread_rng = rng.clone();
                     // let current_index = _index.fetch_add(1, Ordering::SeqCst);
@@ -451,7 +463,7 @@ impl Population {
                 // generate Poisson sampler
                 self.pop
                     .axis_iter_mut(Axis(0))
-                    .into_iter()
+                    .into_par_iter()
                     .for_each(|mut row| {
                         // thread-specific random number generator
                         let mut thread_rng = rng.clone();
@@ -483,7 +495,7 @@ impl Population {
             } else {
                 self.pop
                     .axis_iter_mut(Axis(0))
-                    .into_iter()
+                    .into_par_iter()
                     .for_each(|mut row| {
                         // thread-specific random number generator
                         let mut thread_rng = rng.clone();
@@ -573,7 +585,7 @@ impl Population {
             // for each genome, determine which positions are being transferred
             self.pop
                 .axis_iter(Axis(0))
-                .into_iter()
+                .into_par_iter()
                 .enumerate()
                 .for_each(|(row_idx, row)| {
                     //use std::time::Instant;
@@ -759,7 +771,7 @@ impl Population {
 
         let range = 0..self.pop.nrows();
         let distances: Vec<f64> = range
-            .into_iter()
+            .into_par_iter()
             .map(|i| {
                 let i_distances = get_distance(
                     i,
@@ -799,7 +811,7 @@ impl Population {
         //let mut idx = 0;
         let range = 0..max_distances;
         let distances: Vec<_> = range
-            .into_iter()
+            .into_par_iter()
             .map(|current_index| {
                 let i = range1[current_index];
                 let j = range2[current_index];
@@ -826,6 +838,9 @@ impl Population {
                     _final_distance = distance as f64 / (self.pop.ncols() as f64);
                 } else {
                     let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
+                    // let (intersection_test, union_test) = jaccard_distance_test(row1_slice, row2_slice);
+                    // println!("intersection_test: {:?} intersection: {:?}", intersection_test, intersection);
+                    // println!("union_test: {:?} union: {:?}", union_test, union);
                     _final_distance = 1.0
                         - ((intersection as f64 + self.core_genes as f64)
                             / (union as f64 + self.core_genes as f64));
