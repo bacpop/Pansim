@@ -21,27 +21,31 @@ use std::sync::{Arc, RwLock};
 
 use logsumexp::LogSumExp;
 use crate::hamming::hamming_bitwise_fast;
+use safe_arch::*;
 
 use std::fs::File;
 use std::io::{self, Write};
 
 use std::usize;
 
-fn jaccard_distance(row1: &[u8], row2: &[u8]) -> (usize, usize) {
-    assert_eq!(row1.len(), row2.len(), "Rows must have the same length");
+fn jaccard_distance(v1: &[u8], v2: &[u8]) -> (u32, u32) {
+    assert_eq!(v1.len(), v2.len(), "Vectors must have the same length.");
 
-    let intersection: usize = row1
-        .iter()
-        .zip(row2.iter())
-        .filter(|&(x, y)| *x == 1 && *y == 1)
-        .count();
-    let union: usize = row1
-        .iter()
-        .zip(row2.iter())
-        .filter(|&(x, y)| *x == 1 || *y == 1)
-        .count();
+    let mut intersection = 0u8;
+    let mut union = 0u8;
 
-    (intersection, union)
+    // Loop through each element and compute intersection and union
+    for (a, b) in v1.iter().zip(v2.iter()) {
+        intersection |= a & b; // Bitwise AND for intersection
+        union |= a | b;        // Bitwise OR for union
+    }
+
+    // Count the number of set bits in intersection and union
+    let intersection_count: u32 = intersection.count_ones();
+    let union_count = union.count_ones();
+
+    // Jaccard distance: 1 - (intersection / union)
+    (intersection_count, union_count)
 }
 
 fn average(numbers: &[f64]) -> f64 {
@@ -75,54 +79,6 @@ pub fn sample_beta(num_samples: usize, rng: &mut StdRng) -> Vec<f64> {
     return return_vec;
 }
 
-fn non_constant_columns(array: &Array2<u8>) -> Vec<usize> {
-    (0..array.ncols())
-        .filter(|&col| {
-            let mut seen = [false; 256]; // Track encountered values
-            let mut unique_count = 0;
-
-            for &value in array.column(col).iter() {
-                if !seen[value as usize] {
-                    seen[value as usize] = true;
-                    unique_count += 1;
-                    if unique_count > 1 {
-                        return true; // Early exit if more than one unique value
-                    }
-                }
-            }
-            false
-        })
-        .collect()
-}
-
-fn get_variable_loci(
-    core: bool,
-    pop: &Array2<u8>,
-) -> (
-    ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>>,
-    f64,
-) {
-    // Determine which column indices have variance greater than 0
-    let columns_to_iter: Vec<usize> = non_constant_columns(&pop);
-
-    // get matches for jaccard distance calculation
-    let mut matches: f64 = 0.0;
-    if core != true {
-        matches = pop
-            .axis_iter(Axis(1))
-            .filter(|col| col.iter().all(|&x| x == 1))
-            .count() as f64;
-    }
-
-    let subset_array: Array2<u8> = pop.select(Axis(1), &columns_to_iter);
-    let mut contiguous_array: ndarray::ArrayBase<ndarray::OwnedRepr<u8>, ndarray::Dim<[usize; 2]>> =
-        Array2::zeros((subset_array.dim().0, subset_array.dim().1));
-    contiguous_array.assign(&subset_array);
-
-    (contiguous_array, matches)
-}
-
-// TODO take vetor as reference and update in place rather then returning new vector each time
 fn get_distance(
     i: usize,
     nrows: usize,
@@ -149,7 +105,7 @@ fn get_distance(
                 distance as f64 / (ncols as f64)
             } else {
                 
-                let (intersection, union) = jaccard_distance(&row1_slice, row2_slice);
+                let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
                 1.0 - ((intersection as f64 + matches + core_genes as f64)
                     / (union as f64 + matches + core_genes as f64))
             };
@@ -218,7 +174,7 @@ impl Population {
                 .collect();
 
             pop.axis_iter_mut(Axis(0))
-                .into_par_iter()
+                .into_iter()
                 .for_each(|mut row| {
                     for j in 0..allele_count {
                         row[j] = allele_vec[j];
@@ -233,7 +189,7 @@ impl Population {
             }
 
             pop.axis_iter_mut(Axis(0))
-                .into_par_iter()
+                .into_iter()
                 .for_each(|mut row| {
                     // let mut thread_rng = rng.clone();
                     // let current_index = _index.fetch_add(1, Ordering::SeqCst);
@@ -495,7 +451,7 @@ impl Population {
                 // generate Poisson sampler
                 self.pop
                     .axis_iter_mut(Axis(0))
-                    .into_par_iter()
+                    .into_iter()
                     .for_each(|mut row| {
                         // thread-specific random number generator
                         let mut thread_rng = rng.clone();
@@ -527,7 +483,7 @@ impl Population {
             } else {
                 self.pop
                     .axis_iter_mut(Axis(0))
-                    .into_par_iter()
+                    .into_iter()
                     .for_each(|mut row| {
                         // thread-specific random number generator
                         let mut thread_rng = rng.clone();
@@ -617,7 +573,7 @@ impl Population {
             // for each genome, determine which positions are being transferred
             self.pop
                 .axis_iter(Axis(0))
-                .into_par_iter()
+                .into_iter()
                 .enumerate()
                 .for_each(|(row_idx, row)| {
                     //use std::time::Instant;
@@ -799,24 +755,24 @@ impl Population {
     }
 
     pub fn average_distance(&mut self) -> Vec<f64> {
-        let (contiguous_array, matches) = get_variable_loci(self.core, &self.pop);
+        //let (contiguous_array, matches) = get_variable_loci(self.core, &self.pop);
 
         let range = 0..self.pop.nrows();
         let distances: Vec<f64> = range
-            .into_par_iter()
+            .into_iter()
             .map(|i| {
                 let i_distances = get_distance(
                     i,
                     self.pop.nrows(),
                     self.core_genes,
-                    matches,
+                    0.0,
                     self.core,
-                    &contiguous_array,
+                    &self.pop,
                     self.pop.ncols(),
                 );
 
-                let mut _final_distance =
-                    i_distances.iter().sum::<f64>() / i_distances.len() as f64;
+                let (sum, count) = i_distances.iter().fold((0.0, 0), |(s, c), &x| (s + x, c + 1));
+                let mut _final_distance = sum / count as f64;
 
                 // ensure no zero distances that may cause no selection of isolates.
                 if _final_distance == 0.0 {
@@ -838,18 +794,18 @@ impl Population {
         range1: &Vec<usize>,
         range2: &Vec<usize>,
     ) -> Vec<f64> {
-        let (contiguous_array, matches) = get_variable_loci(self.core, &self.pop);
+        //let (contiguous_array, matches) = get_variable_loci(self.core, &self.pop);
 
         //let mut idx = 0;
         let range = 0..max_distances;
         let distances: Vec<_> = range
-            .into_par_iter()
+            .into_iter()
             .map(|current_index| {
                 let i = range1[current_index];
                 let j = range2[current_index];
 
-                let row1 = contiguous_array.index_axis(Axis(0), i);
-                let row2 = contiguous_array.index_axis(Axis(0), j);
+                let row1 = self.pop.index_axis(Axis(0), i);
+                let row2 = self.pop.index_axis(Axis(0), j);
                 let row1_slice = row1.as_slice().unwrap();
                 let row2_slice = row2.as_slice().unwrap();
                 //println!("i: {:?}", i);
@@ -871,8 +827,8 @@ impl Population {
                 } else {
                     let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
                     _final_distance = 1.0
-                        - ((intersection as f64 + matches + self.core_genes as f64)
-                            / (union as f64 + matches + self.core_genes as f64));
+                        - ((intersection as f64 + self.core_genes as f64)
+                            / (union as f64 + self.core_genes as f64));
                 }
                 //println!("_final_distance: {:?}", _final_distance);
                 _final_distance

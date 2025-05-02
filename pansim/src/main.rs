@@ -171,7 +171,7 @@ fn main() -> io::Result<()> {
     let neg_lambda: f64 = matches.value_of_t("neg_lambda").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
-    let competition = matches.is_present("competition");
+    let competition = true;//matches.is_present("competition");
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
     let print_matrices: bool = matches.is_present("print_matrices");
