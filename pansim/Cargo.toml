@@ -14,6 +14,7 @@ rayon = "1.5"
 ndarray = { version = "0.15.6", features = ["rayon"] }
 clap = "3.0"
 logsumexp = "0.1"
+safe_arch = "0.7"
 
 [profile.release]
-debug = false 
+debug = true 

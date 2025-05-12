@@ -20,24 +20,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use logsumexp::LogSumExp;
-use crate::hamming::hamming_bitwise_fast;
+use crate::distances::*;
 use safe_arch::*;
 
 use std::fs::File;
 use std::io::{self, Write};
 
 use std::usize;
-
-#[inline(always)]
-fn jaccard_distance(v1: &[u8], v2: &[u8]) -> (u32, u32) {
-    assert_eq!(v1.len(), v2.len());
-
-    v1.iter()
-      .zip(v2.iter())
-      .fold((0, 0), |(intersection, union), (&a, &b)| {
-          (intersection + (a & b).count_ones(), union + (a | b).count_ones())
-      })
-}
 
 // fn jaccard_distance_test(v1: &[u8], v2: &[u8]) -> (u32, u32) {
 //     assert_eq!(v1.len(), v2.len(), "Vectors must have the same length.");
@@ -114,7 +103,7 @@ fn get_distance(
                 distance as f64 / (ncols as f64)
             } else {
                 
-                let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
+                let (intersection, union) = jaccard_distance_fast(row1_slice, row2_slice);
                 // let (intersection_test, union_test) = jaccard_distance_test(row1_slice, row2_slice);
                 // println!("intersection_test: {:?} intersection: {:?}", intersection_test, intersection);
                 // println!("union_test: {:?} union: {:?}", union_test, union);
@@ -837,7 +826,7 @@ impl Population {
 
                     _final_distance = distance as f64 / (self.pop.ncols() as f64);
                 } else {
-                    let (intersection, union) = jaccard_distance(row1_slice, row2_slice);
+                    let (intersection, union) = jaccard_distance_fast(row1_slice, row2_slice);
                     // let (intersection_test, union_test) = jaccard_distance_test(row1_slice, row2_slice);
                     // println!("intersection_test: {:?} intersection: {:?}", intersection_test, intersection);
                     // println!("union_test: {:?} union: {:?}", union_test, union);

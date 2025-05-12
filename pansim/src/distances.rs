@@ -15,6 +15,11 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 // SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+use std::os::unix::raw::uid_t;
+
+use crate::distances;
+
+#[inline(always)]
 pub fn hamming_bitwise_fast(x: &[u8], y: &[u8]) -> u32 {
     assert_eq!(x.len(), y.len());
 
@@ -44,4 +49,29 @@ pub fn hamming_bitwise_fast(x: &[u8], y: &[u8]) -> u32 {
     }
 
     distance
+}
+
+
+pub fn jaccard_distance_fast(x: &[u8], y: &[u8]) -> (u32, u32) {
+    assert_eq!(x.len(), y.len());
+
+    let mut intersection = 0;
+    let mut union = 0;
+
+    // Process 8 bytes at a time using u64
+    for (x_chunk, y_chunk) in x.chunks_exact(8).zip(y.chunks_exact(8)) {
+        let x_val = u64::from_ne_bytes(x_chunk.try_into().unwrap());
+        let y_val = u64::from_ne_bytes(y_chunk.try_into().unwrap());
+
+        intersection += (x_val & y_val).count_ones();
+        union += (x_val | y_val).count_ones();
+    }
+
+    // Handle remaining bytes
+    for (x_byte, y_byte) in x.chunks_exact(8).remainder().iter().zip(y.chunks_exact(8).remainder()) {
+        intersection += (x_byte & y_byte).count_ones();
+        union += (x_byte | y_byte).count_ones();
+    }
+
+    (intersection, union)
 }
