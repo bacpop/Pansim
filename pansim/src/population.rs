@@ -16,6 +16,7 @@ use rand::{Rng};
 use ndarray::Zip;
 use ndarray::{s, Array1, Array2, Axis};
 use std::f64::MIN_POSITIVE;
+use std::f64::MAX;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -45,6 +46,19 @@ use std::usize;
 //     }
 //     (intersection, union)
 // }
+
+fn safe_pow(base: f64, exp: f64) -> f64 {
+    let result = base.powf(exp);
+    if result.is_infinite() {
+        if result.is_sign_positive() {
+            MAX
+        } else {
+            MIN_POSITIVE
+        }
+    } else {
+        result
+    }
+}
 
 fn average(numbers: &[f64]) -> f64 {
     numbers.iter().sum::<f64>() as f64 / numbers.len() as f64
@@ -355,7 +369,9 @@ impl Population {
         //println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
-            weights[i] *= avg_pairwise_dists[i] * (1.0 / competition_strength);
+            let scaled_distance = avg_pairwise_dists[i] * (1.0 / competition_strength);
+            let exponent = safe_pow(weights[i], scaled_distance);
+            weights[i] = exponent;
         }
 
         // println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);

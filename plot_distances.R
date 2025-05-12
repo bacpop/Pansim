@@ -2,16 +2,16 @@ library(ggplot2)
 
 #plot pairwise distances
 #filename <- "pan_mu_0.05_core_mu_0.019_prop_0.1_recomb_0.0_competition_true"
-in_dir <- "gridsearch/commit_996b2e4/files/"
-out_dir <- "gridsearch/commit_996b2e4/figures/"
+in_dir <- "gridsearch/commit_9e66758/files/"
+out_dir <- "gridsearch/commit_9e66758/figures/"
 filenames <- list.files(path = in_dir, pattern = "\\.tsv$")
 
 
 for (filename in filenames)
 {
-  filename <- "pansim/distances.tsv"
-  in_dir <- ""
-  out_dir <- ""
+  #filename <- "pansim/distances.tsv"
+  #in_dir <- ""
+  #out_dir <- ""
   df <- read.csv(paste(in_dir, filename, sep = ""), sep = "\t", header = FALSE)
   colnames(df) <- c("Core", "Accessory")
   
