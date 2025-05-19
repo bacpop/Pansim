@@ -2,8 +2,8 @@ library(ggplot2)
 
 #plot pairwise distances
 #filename <- "pan_mu_0.05_core_mu_0.019_prop_0.1_recomb_0.0_competition_true"
-in_dir <- "gridsearch/commit_9e66758/files/"
-out_dir <- "gridsearch/commit_9e66758/figures/"
+in_dir <- "gridsearch/commit_64f50f8/files/"
+out_dir <- "gridsearch/commit_64f50f8/figures/"
 filenames <- list.files(path = in_dir, pattern = "\\.tsv$")
 
 
@@ -17,8 +17,9 @@ for (filename in filenames)
   
   p <- ggplot(df, aes(x = Core, y = Accessory)) + geom_point(alpha=0.2, colour="#0c589c") +
     labs(x = "Core", y = "Accessory") +
+    geom_density_2d(aes(color = ..level..), bins = 15) +
     theme_light() +
-    theme(axis.title = element_text(size=20), axis.text = element_text(size=18))
+    theme(axis.title = element_text(size=20), axis.text = element_text(size=18), legend.position ="none")
   p
   
   prefix <- sub(pattern = "(.*)\\..*$", replacement = "\\1", filename)
