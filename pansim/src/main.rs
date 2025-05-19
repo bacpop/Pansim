@@ -409,22 +409,6 @@ fn main() -> io::Result<()> {
         // Run for n_gen generations
         //let now_gen = Instant::now();
 
-        // mutate core genome
-        //println!("started {}", j);
-        core_genome.mutate_alleles(&n_core_mutations, &mut rng, &core_weighted_dist);
-
-        //println!("finished mutating core genome {}", j);
-        pan_genome.mutate_alleles(&n_pan_mutations, &mut rng, &pan_weighted_dist);
-        //println!("finished mutating pangenome {}", j);
-
-        // recombine populations
-        if HR_rate > 0.0 {
-            core_genome.recombine(&n_recombinations_core, &mut rng, &core_weights);
-        }
-        if HGT_rate > 0.0 {
-            pan_genome.recombine(&n_recombinations_pan, &mut rng, &pan_weights);
-        }
-
         // sample new individuals
         //let sampled_individuals: Vec<usize> = (0..pop_size).map(|_| rng.gen_range(0..pop_size)).collect();
         let mut avg_pairwise_dists = vec![1.0; pop_size];
@@ -441,6 +425,22 @@ fn main() -> io::Result<()> {
         //println!("finished copying core genome {}", j);
         pan_genome.next_generation(&sampled_individuals);
         //println!("finished copying pangenome {}", j);
+
+        // mutate core genome
+        //println!("started {}", j);
+        core_genome.mutate_alleles(&n_core_mutations, &mut rng, &core_weighted_dist);
+
+        //println!("finished mutating core genome {}", j);
+        pan_genome.mutate_alleles(&n_pan_mutations, &mut rng, &pan_weighted_dist);
+        //println!("finished mutating pangenome {}", j);
+
+        // recombine populations
+        if HR_rate > 0.0 {
+            core_genome.recombine(&n_recombinations_core, &mut rng, &core_weights);
+        }
+        if HGT_rate > 0.0 {
+            pan_genome.recombine(&n_recombinations_pan, &mut rng, &pan_weights);
+        }
         
         // if at final generation, sample
         if j == n_gen -1 {
