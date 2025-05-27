@@ -428,10 +428,10 @@ fn main() -> io::Result<()> {
 
         // mutate core genome
         //println!("started {}", j);
-        core_genome.mutate_alleles(&n_core_mutations, &mut rng, &core_weighted_dist);
+        core_genome.mutate_alleles(&n_core_mutations, &core_weighted_dist);
 
         //println!("finished mutating core genome {}", j);
-        pan_genome.mutate_alleles(&n_pan_mutations, &mut rng, &pan_weighted_dist);
+        pan_genome.mutate_alleles(&n_pan_mutations, &pan_weighted_dist);
         //println!("finished mutating pangenome {}", j);
 
         // recombine populations

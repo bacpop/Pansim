@@ -168,11 +168,6 @@ impl Population {
         core_genes: usize,
         acc_sampling_vec: &Vec<f64>,
     ) -> Self {
-        //let mut pop = Array2::<u8>::zeros((size, allele_count));
-
-        // for multithreading
-        let _index = AtomicUsize::new(0);
-        let _update_rng = AtomicUsize::new(0);
 
         // generate vector of vectors to hold information in
         let start: Array1<u8> = Array1::zeros(allele_count);
@@ -206,33 +201,13 @@ impl Population {
             pop.axis_iter_mut(Axis(0))
                 .into_par_iter()
                 .for_each(|mut row| {
-                    // let mut thread_rng = rng.clone();
-                    // let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                    // //let thread_index = rayon::current_thread_index();
-                    // //print!("{:?} ", thread_index);
-
-                    // // Jump the state of the generator for this thread
-                    // for _ in 0..current_index {
-                    //     thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                    // }
 
                     // ensure all accessory genomes are identical at start
                     for j in 0..allele_count {
-                        //let sample_prop = acc_sampling_vec[j];
-                        //et sampled_value: f64 = thread_rng.gen();
-                        //row[j] = if sampled_value < avg_gene_freq { 1 } else { 0 };
                         row[j] = acc_array[j];
-                        //_update_rng.fetch_add(1, Ordering::SeqCst);
                     }
                 });
         }
-
-        // // update rng in place
-        // let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        // //print!("{:?} ", rng_index);
-        // for _ in 0..rng_index {
-        //     rng.gen::<u64>(); // Discard some numbers to mimic jumping
-        // }
 
         let core_vec: Vec<Vec<u8>> =
             vec![vec![2, 4, 8], vec![1, 4, 8], vec![1, 2, 8], vec![1, 2, 4]];
@@ -447,7 +422,6 @@ impl Population {
     pub fn mutate_alleles(
         &mut self,
         mutations_vec: &Vec<f64>,
-        rng: &mut StdRng,
         weighted_dist: &Vec<WeightedIndex<f32>>,
     ) {
         // index for random number generation
@@ -471,25 +445,17 @@ impl Population {
                     .into_par_iter()
                     .for_each(|mut row| {
                         // thread-specific random number generator
-                        let mut thread_rng = rng.clone();
-                        let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                        let mut thread_rng = rand::thread_rng();
                         //let thread_index = rayon::current_thread_index();
                         //print!("{:?} ", thread_index);
 
-                        // Jump the state of the generator for this thread
-                        for _ in 0..current_index {
-                            thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                        }
-
                         // sample from Poisson distribution for number of sites to mutate in this isolate
                         let n_sites = poisson.sample(&mut thread_rng) as usize;
-                        _update_rng.fetch_add(1, Ordering::SeqCst);
 
                         // iterate for number of mutations required to reach mutation rate
                         for _ in 0..n_sites {
                             // sample new site to mutate
                             let mutant_site = weighted_dist[site_idx].sample(&mut thread_rng);
-                            _update_rng.fetch_add(1, Ordering::SeqCst);
                             let value = row[mutant_site];
                             let new_allele: u8 = if value == 0 as u8 { 1 } else { 0 };
 
@@ -503,25 +469,17 @@ impl Population {
                     .into_par_iter()
                     .for_each(|mut row| {
                         // thread-specific random number generator
-                        let mut thread_rng = rng.clone();
-                        let current_index = _index.fetch_add(1, Ordering::SeqCst);
+                        let mut thread_rng = rand::thread_rng();
                         //let thread_index = rayon::current_thread_index();
                         //print!("{:?} ", thread_index);
 
-                        // Jump the state of the generator for this thread
-                        for _ in 0..current_index {
-                            thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                        }
-
                         // sample from Poisson distribution for number of sites to mutate in this isolate
                         let n_sites = thread_rng.sample(poisson) as usize;
-                        _update_rng.fetch_add(1, Ordering::SeqCst);
 
                         // iterate for number of mutations required to reach mutation rate
                         for _ in 0..n_sites {
                             // sample new site to mutate
                             let mutant_site = weighted_dist[site_idx].sample(&mut thread_rng);
-                            _update_rng.fetch_add(1, Ordering::SeqCst);
 
                             // get possible values to mutate to, must be different from current value
                             let value = row[mutant_site];
@@ -529,19 +487,12 @@ impl Population {
 
                             // sample new allele
                             let new_allele = values.iter().choose_multiple(&mut thread_rng, 1)[0];
-                            _update_rng.fetch_add(1, Ordering::SeqCst);
 
                             // set value in place
                             row[mutant_site] = *new_allele;
                         }
                     });
             }
-        }
-        // update rng in place
-        let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-        //print!("{:?} ", rng_index);
-        for _ in 0..rng_index {
-            rng.gen::<u64>(); // Discard some numbers to mimic jumping
         }
     }
 
@@ -597,17 +548,10 @@ impl Population {
                     //let now = Instant::now();
 
                     // thread-specific random number generator
-                    let mut thread_rng = rng.clone();
-                    let current_index = _index.fetch_add(1, Ordering::SeqCst);
-                    // Jump the state of the generator for this thread
-                    for _ in 0..current_index {
-                        thread_rng.gen::<u64>(); // Discard some numbers to mimic jumping
-                    }
+                    let mut thread_rng = rand::thread_rng();
 
                     // sample from Poisson distribution for number of sites to mutate in this isolate
                     let n_sites = poisson_recomb.sample(&mut thread_rng) as usize;
-                    //let n_targets = poisson_recip.sample(&mut thread_rng) as usize;
-                    _update_rng.fetch_add(1, Ordering::SeqCst);
 
                     // get sampling weights for each pairwise comparison
                     // TODO remove this, jsut have same distance for all individuals
@@ -639,8 +583,6 @@ impl Population {
                     //println!("finished sampling total: {}, {:.2?}", row_idx, elapsed);
 
                     //let sampled_recipients: Vec<usize> = vec![1, 7, 20, 705, 256];
-
-                    _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
                     let mut sampled_values: Vec<u8> = vec![1; n_sites];
                     // get non-zero indices
@@ -711,8 +653,6 @@ impl Population {
                     //elapsed = now.elapsed();
                     //println!("finished getting sites total: {}, {:.2?}", row_idx, elapsed);
 
-                    // update the rng
-                    _update_rng.fetch_add(n_sites, Ordering::SeqCst);
 
                     // assign values
                     {
@@ -762,12 +702,6 @@ impl Population {
                 }
             }
 
-            // update rng in place
-            let rng_index: usize = _update_rng.load(Ordering::SeqCst);
-            //print!("{:?} ", rng_index);
-            for _ in 0..rng_index {
-                rng.gen::<u64>(); // Discard some numbers to mimic jumping
-            }
         }
     }
 
