@@ -11,6 +11,7 @@ use clap::{Arg, Command};
 
 use std::fs::File;
 use std::io::{self, Write};
+use std::vec;
 
 fn main() -> io::Result<()> {
     // Define the command-line arguments using clap
@@ -149,6 +150,21 @@ fn main() -> io::Result<()> {
         .help("Strength of competition felt by strain to all others. Default = 1.0")
         .required(false)
         .default_value("1.0"))
+    .arg(Arg::new("rate_core1")
+        .long("rate_core1")
+        .help("Proportion of core mutations that mutates per generation in core compartment 1. Must be 0.0 <= x")
+        .required(false)
+        .default_value("1.0"))
+    .arg(Arg::new("rate_core2")
+        .long("rate_core2")
+        .help("Proportion of core mutations that mutates per generation in core compartment 2. Must be 0.0 <= x")
+        .required(false)
+        .default_value("1.0"))
+    .arg(Arg::new("rate_core3")
+        .long("rate_core3")
+        .help("Proportion of core mutations that mutates per generation in core compartment 1. Must be 0.0 <= x")
+        .required(false)
+        .default_value("1.0"))
     .get_matches();
 
     // Set the argument to a variable
@@ -178,6 +194,9 @@ fn main() -> io::Result<()> {
     let no_control_genome_size: bool = matches.is_present("no_control_genome_size");
     let genome_size_penalty: f64 = matches.value_of_t("genome_size_penalty").unwrap();
     let competition_strength: f64 = matches.value_of_t("competition_strength").unwrap();
+    let rate_core1: f64 = matches.value_of_t("rate_core1").unwrap();
+    let rate_core2: f64 = matches.value_of_t("rate_core2").unwrap();
+    let rate_core3: f64 = matches.value_of_t("rate_core3").unwrap();
 
     //let verbose = true;
 
@@ -240,6 +259,12 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    if (rate_core1 < 0.0) || (rate_core2 < 0.0) || (rate_core3 < 0.0) {
+        println!("rate_core1, rate_core2 and rate_core3 must be above 0.0 and below or equal to 1.0");
+        println!("avg_gene_freq: {}", avg_gene_freq);
+        return Ok(());
+    }
+
     if n_threads < 1 {
         n_threads = 1;
     }
@@ -266,16 +291,29 @@ fn main() -> io::Result<()> {
     let avg_gene_num: i32 = (avg_gene_freq * pan_size as f64).round() as i32;
 
     // calculate number of mutations per genome per generation, should this be whole pangenome or just accessory genes?
-    let n_core_mutations =
-        vec![(((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() as f64];
+    let n_core_mutations_total = (((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() as f64;
+    let core_rates_sum = rate_core1 + rate_core2 + rate_core3;
+    let core_rates: Vec<f64> = vec![(rate_core1 / core_rates_sum), (rate_core2/ core_rates_sum), (rate_core3 / core_rates_sum)];
 
     // calculate average recombinations per genome
-    let n_recombinations_core: Vec<f64> = vec![(n_core_mutations[0] as f64 * HR_rate).round()];
-    let n_recombinations_pan_total = (n_core_mutations[0] as f64 * HGT_rate).round();
+    let n_recombinations_core: Vec<f64> = vec![(n_core_mutations_total as f64 * HR_rate).round()];
+    let n_recombinations_pan_total = (n_core_mutations_total as f64 * HGT_rate).round();
     let mut n_recombinations_pan: Vec<f64> = vec![];
 
     // set weights for sampling of sites
-    let core_weights: Vec<Vec<f32>> = vec![vec![1.0; core_size]; 1];
+    let mut core_weights: Vec<Vec<f32>> = vec![];
+    let mut n_core_mutations: Vec<f64> = vec![];
+    let num_core_sites = vec![(core_size as f64 / 3.0).round() as usize; 3];
+    for i in 0..num_core_sites.len() {
+        n_core_mutations.push(n_core_mutations_total * core_rates[i]);
+        core_weights.push(vec![1.0; num_core_sites[i]]);
+    }
+
+    println!("core_weights {:?}", core_weights);
+    println!("n_core_mutations {:?}", n_core_mutations);
+    println!("num_core_sites {:?}", num_core_sites);
+    println!("core_rates {:?}", core_rates);
+    
     let mut pan_weights: Vec<Vec<f32>> = vec![];
     let mut n_pan_mutations: Vec<f64> = vec![];
     let mut selection_weights: Vec<f64> = vec![0.0; pan_size];
@@ -320,7 +358,7 @@ fn main() -> io::Result<()> {
     // create weights for either rate compartments
     // for gene rate 1 if any exist, otherwise don't add
     if num_gene1_sites > 0 {
-        let mut pan_weights_1: Vec<f32> = vec![0.0; pan_size];
+        let mut pan_weights_1: Vec<f32> = vec![0.0; num_gene1_sites];
         for i in 0..num_gene1_sites {
             pan_weights_1[i] = 1.0;
         }
@@ -333,7 +371,7 @@ fn main() -> io::Result<()> {
     
     // gene 2 rates of mutation and HGT, if any genes exist, otherwise don't add
     if num_gene1_sites < pan_size {
-        let mut pan_weights_2: Vec<f32> = vec![0.0; pan_size];
+        let mut pan_weights_2: Vec<f32> = vec![0.0; pan_size - num_gene1_sites];
         for i in num_gene1_sites..pan_size {
             pan_weights_2[i] = 1.0;
         }

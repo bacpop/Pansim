@@ -369,8 +369,8 @@ impl Population {
         //     // println!("max_selection_weights: {:?}", max_selection_weights);
         //     // let min_selection_weights = selection_weights.iter().copied().fold(f64::INFINITY, f64::min);
         //     // println!("min_selection_weights: {:?}", min_selection_weights);
-        //     // let mean_selection_weights = average(&selection_weights);
-        //     // println!("mean_selection_weights: {:?}", mean_selection_weights);
+        //     let mean_selection_weights = average(&selection_weights);
+        //     println!("mean_selection_weights: {:?}", mean_selection_weights);
 
         //     //println!("differences: {:?}", differences);
 
