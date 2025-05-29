@@ -303,15 +303,18 @@ fn main() -> io::Result<()> {
     // set weights for sampling of sites
     let mut core_weights: Vec<Vec<f32>> = vec![];
     let mut n_core_mutations: Vec<f64> = vec![];
-    let num_core_sites = vec![(core_size as f64 / 3.0).round() as usize; 3];
-    for i in 0..num_core_sites.len() {
+    for i in 0..core_rates.len() {
         n_core_mutations.push(n_core_mutations_total * core_rates[i]);
-        core_weights.push(vec![1.0; num_core_sites[i]]);
+        // set all weights in specific locations in core to be 1.0 with given stride of 3 for each codon
+        let mut core_weights_i: Vec<f32> = vec![0.0; core_size];
+        for j in (i..core_size).step_by(3) {
+            core_weights_i[j] = 1.0
+        }
+        core_weights.push(core_weights_i);
     }
 
     // println!("core_weights {:?}", core_weights);
     // println!("n_core_mutations {:?}", n_core_mutations);
-    // println!("num_core_sites {:?}", num_core_sites);
     // println!("core_rates {:?}", core_rates);
     
     let mut pan_weights: Vec<Vec<f32>> = vec![];
@@ -358,7 +361,7 @@ fn main() -> io::Result<()> {
     // create weights for either rate compartments
     // for gene rate 1 if any exist, otherwise don't add
     if num_gene1_sites > 0 {
-        let mut pan_weights_1: Vec<f32> = vec![0.0; num_gene1_sites];
+        let mut pan_weights_1: Vec<f32> = vec![0.0; pan_size];
         for i in 0..num_gene1_sites {
             pan_weights_1[i] = 1.0;
         }
@@ -371,7 +374,7 @@ fn main() -> io::Result<()> {
     
     // gene 2 rates of mutation and HGT, if any genes exist, otherwise don't add
     if num_gene1_sites < pan_size {
-        let mut pan_weights_2: Vec<f32> = vec![0.0; pan_size - num_gene1_sites];
+        let mut pan_weights_2: Vec<f32> = vec![0.0; pan_size];
         for i in num_gene1_sites..pan_size {
             pan_weights_2[i] = 1.0;
         }

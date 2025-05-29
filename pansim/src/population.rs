@@ -464,6 +464,7 @@ impl Population {
                         }
                     });
             } else {
+                //println!("mutations {:?} site_idx {:?}", mutations, site_idx);
                 self.pop
                     .axis_iter_mut(Axis(0))
                     .into_par_iter()
@@ -480,6 +481,7 @@ impl Population {
                         for _ in 0..n_sites {
                             // sample new site to mutate
                             let mutant_site = weighted_dist[site_idx].sample(&mut thread_rng);
+                            //println!("mutant_site {:?} site_idx {:?} ", mutant_site, site_idx);
 
                             // get possible values to mutate to, must be different from current value
                             let value = row[mutant_site];
