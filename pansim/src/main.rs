@@ -309,10 +309,10 @@ fn main() -> io::Result<()> {
         core_weights.push(vec![1.0; num_core_sites[i]]);
     }
 
-    println!("core_weights {:?}", core_weights);
-    println!("n_core_mutations {:?}", n_core_mutations);
-    println!("num_core_sites {:?}", num_core_sites);
-    println!("core_rates {:?}", core_rates);
+    // println!("core_weights {:?}", core_weights);
+    // println!("n_core_mutations {:?}", n_core_mutations);
+    // println!("num_core_sites {:?}", num_core_sites);
+    // println!("core_rates {:?}", core_rates);
     
     let mut pan_weights: Vec<Vec<f32>> = vec![];
     let mut n_pan_mutations: Vec<f64> = vec![];
