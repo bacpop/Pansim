@@ -1,7 +1,7 @@
 library(ggplot2)
 library(reticulate)
 
-path_to_python="path/to/python"
+path_to_python="/Users/shorsfield/miniforge3/envs/biopython/bin/python"
 use_python(path_to_python)
 
 py_run_string("
@@ -13,8 +13,8 @@ def negative_exponential(x, b0, b1, b2): # based on https://isem-cueb-ztian.gith
     return b0 * (1 - np.exp(-b1 * x)) + b2
     
 # fit asymptotic curve using exponential decay
-def negative_exponential_2(x, b0, b1): # based on https://isem-cueb-ztian.github.io/Intro-Econometrics-2017/handouts/lecture_notes/lecture_10/lecture_10.pdf and https://www.statforbiology.com/articles/usefulequations/
-    return (1 - np.exp(-b0 * x)) + b1
+def negative_exponential_2(x, b0, b1, b2): # based on https://isem-cueb-ztian.github.io/Intro-Econometrics-2017/handouts/lecture_notes/lecture_10/lecture_10.pdf and https://www.statforbiology.com/articles/usefulequations/
+    return b0 - (b0 - b1) * np.exp(-b2 * x)
 
 def fit_curve(x, y):
   popt, pcov = curve_fit(negative_exponential, x, y, p0=[1.0, 1.0, 0.0], bounds=([0.0, 0.0, 0.0], [1.0, np.inf, 1.0]))
@@ -22,8 +22,9 @@ def fit_curve(x, y):
   return popt.tolist(), [b0_err, b1_err, b2_err]
   
 def fit_curve2(x, y):
-  popt, pcov = curve_fit(negative_exponential_2, x, y, p0=[1.0, 0.0], bounds=([0.0, 0.0], [np.inf, 1.0]))
-  return popt.tolist()
+  popt, pcov = curve_fit(negative_exponential_2, x, y, p0=[1.0, 0.0, 1.0], bounds=([0.0, 0.0, 0.0], [1.0, 1.0, np.inf]))
+  b0_err, b1_err, b2_err = np.sqrt(np.diag(pcov))
+  return popt.tolist(), [b0_err, b1_err, b2_err]
 ")
 
 #plot pairwise distances
@@ -42,7 +43,7 @@ for (filename in filenames)
   
   adj_core = (-3/4) * log(1 - (4/3 * max(df$Core)))
   
-  params <- py$fit_curve(df$Core, df$Accessory)
+  params <- py$fit_curve2(df$Core, df$Accessory)
   b0 <- params[[1]][[1]]
   b1 <- params[[1]][[2]]
   b2 <- params[[1]][[3]]
@@ -55,7 +56,8 @@ for (filename in filenames)
     geom_density_2d(aes(color = ..level..), bins = 15) +
     theme_light() +
     theme(axis.title = element_text(size=20), axis.text = element_text(size=18), legend.position ="none") +
-    stat_function(fun = function(x) b0 * (1 - exp(-b1 * x)) + b2,
+    stat_function(fun = function(x) b0 - (b0 - b1) * exp(-b2 * x),
+                  #fun = function(x) b0 * (1 - exp(-b1 * x)) + b2,
                   color = "red", linewidth = 1) +
       annotate("text", x = min(df$Core), y = max(df$Accessory), hjust = 0, vjust = 1,
                label = sprintf("Fitted: b0 = %.2f, b1 = %.2f, b2 = %.2f\nb0_err = %.2f, b1_err = %.2f, b2_err = %.2f", b0, b1, b2, b0_err, b1_err, b2_err),
