@@ -124,6 +124,11 @@ fn main() -> io::Result<()> {
         .required(false)
         .takes_value(false))
         .help("Prints core and accessory matrices.")
+    .arg(Arg::new("print_selection")
+        .long("print_selection")
+        .required(false)
+        .takes_value(false))
+        .help("Prints selection coefficients.")
     .arg(Arg::new("threads")
         .long("threads")
         .help("Number of threads.")
@@ -175,6 +180,7 @@ fn main() -> io::Result<()> {
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
     let print_matrices: bool = matches.is_present("print_matrices");
+    let print_selection: bool = matches.is_present("print_selection");
     let no_control_genome_size: bool = matches.is_present("no_control_genome_size");
     let genome_size_penalty: f64 = matches.value_of_t("genome_size_penalty").unwrap();
     let competition_strength: f64 = matches.value_of_t("competition_strength").unwrap();
@@ -310,6 +316,18 @@ fn main() -> io::Result<()> {
             }
             selection_weights[i] = selection_coeffient;
         }
+    }
+
+    if print_selection {
+
+        let mut output_file = outpref.to_owned();
+        let extension: &str = "_selection.tsv";
+        output_file.push_str(extension);
+
+        let mut file = File::create(output_file)?;
+        let line: Vec<String> = selection_weights.iter().map(|&x| x.to_string()).collect();
+                writeln!(file, "{}", line.join("\n"))?;
+
     }
 
     // calculate sites for fast accessory genome
