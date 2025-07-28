@@ -60,6 +60,15 @@ fn safe_pow(base: f64, exp: f64) -> f64 {
     }
 }
 
+pub fn normalize_avg_dists(numbers: &[f64]) -> Vec<f64> {
+    //let sum = numbers.iter().sum::<f64>() as f64;
+
+    let minvalue = numbers.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+
+    let normalised: Vec<f64> = numbers.iter().map(|&x| (x / minvalue)).collect();
+    normalised
+}
+
 fn average(numbers: &[f64]) -> f64 {
     numbers.iter().sum::<f64>() as f64 / numbers.len() as f64
 }
@@ -341,18 +350,21 @@ impl Population {
             weights = selection_weights.clone();
         }
 
-        //println!("post_genome_size_weights: {:?}", weights);
+        // normalise pairwise dists to minimum value
+        let norm_avg_pairwise_dists = normalize_avg_dists(&avg_pairwise_dists);
+
+        println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
-            let scaled_distance = avg_pairwise_dists[i] * (1.0 / competition_strength);
-            let exponent = safe_pow(weights[i], scaled_distance);
+            let scaled_distance = norm_avg_pairwise_dists[i] * competition_strength;
+            let exponent = weights[i] * scaled_distance;
             weights[i] = exponent;
         }
 
-        // println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
-        // println!("post_pairwise_weights: {:?}", weights);
-        // let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
-        // println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
+        println!("norm_avg_pairwise_dists: {:?}", norm_avg_pairwise_dists);
+        println!("post_pairwise_weights: {:?}", weights);
+        let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
+        println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
 
         // determine whether weights is only 0s
         let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
