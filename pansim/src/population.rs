@@ -351,32 +351,55 @@ impl Population {
                 .collect();
 
             //println!("differences: {:?}", differences);
+            // scale differeces using logsumexp
+            //let mut scaled_differences: Vec<f64> = differences.clone().into_iter().map(|diff| diff * genome_size_penalty.ln()).collect();
+            //let logsumexp_value = scaled_differences.iter().ln_sum_exp();
+            // scaled_differences = scaled_differences.into_iter()
+            //     .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
+            //     .collect();
 
             weights = differences
                 .iter()
                 .enumerate()
                 .map(|(row_idx, &diff)| genome_size_penalty.powi(diff) * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
                 .collect();
+
+            // weights = differences
+            //     .iter()
+            //     .enumerate()
+            //     .map(|(row_idx, _)| scaled_differences[row_idx] * selection_weights[row_idx]) // based on https://pmc.ncbi.nlm.nih.gov/articles/instance/5320679/bin/mgen-01-38-s001.pdf
+            //     .collect();
         } else {
             weights = selection_weights.clone();
         }
 
-        // normalise pairwise dists to minimum value
-        let norm_avg_pairwise_dists = rescale_vector(avg_pairwise_dists.clone(), competition_strength);
-
+        // normalise pairwise dists using logsumexp
+        let mut scaled_distance_weights : Vec<f64> = avg_pairwise_dists.clone().into_iter().map(| avg_distance| competition_strength * avg_distance.ln()).collect();
+        println!("pre-scaled_distance_weights: {:?}", scaled_distance_weights);
+        let logsumexp_value = scaled_distance_weights.iter().ln_sum_exp();
+        scaled_distance_weights = scaled_distance_weights.into_iter()
+                .map(|x| (x - logsumexp_value).exp()) // exp(log(w) - logsumexp)
+                .collect();
+        let sum_weights: f64 = scaled_distance_weights.iter().sum();
+        scaled_distance_weights = scaled_distance_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
+        
+        println!("post-scaled_distance_weights: {:?}", scaled_distance_weights);
+        
+        //println!("scaled_distance_weights: {:?}", scaled_distance_weights);
         //println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             //let scaled_distance = safe_pow(norm_avg_pairwise_dists[i], 1.0 / competition_strength);
-            let scaled_distance = weights[i] * norm_avg_pairwise_dists[i];
+            let scaled_distance = (weights[i] * scaled_distance_weights[i]);
             weights[i] = scaled_distance;
         }
 
-        // println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
-        // println!("norm_avg_pairwise_dists: {:?}", norm_avg_pairwise_dists);
-        // println!("post_pairwise_weights: {:?}", weights);
-        //let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
-        //println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
+        let scaled_distance_weights = average(&scaled_distance_weights);
+        println!("scaled_distance_weights: {:?}", scaled_distance_weights);
+        println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
+        println!("post_pairwise_weights: {:?}", weights);
+        let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
+        println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
 
         // determine whether weights is only 0s
         let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
