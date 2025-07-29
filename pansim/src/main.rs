@@ -153,7 +153,8 @@ fn main() -> io::Result<()> {
         .long("competition_strength")
         .help("Strength of competition felt by strain to all others. Default = 1.0")
         .required(false)
-        .default_value("1.0"))
+        .default_value("-1.0"))
+        .allow_hyphen_values(true)
     .get_matches();
 
     // Set the argument to a variable

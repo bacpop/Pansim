@@ -60,13 +60,24 @@ fn safe_pow(base: f64, exp: f64) -> f64 {
     }
 }
 
-pub fn normalize_avg_dists(numbers: &[f64]) -> Vec<f64> {
-    let sum = numbers.iter().sum::<f64>() as f64;
+ fn rescale_vector(v: Vec<f64>, f: f64) -> Vec<f64> {
+    if f < 0.0 {
+        return v; // Negative scaling factor is invalid — return unchanged
+    }
 
-    //let minvalue = numbers.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    let min = v.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
-    let normalised: Vec<f64> = numbers.iter().map(|&x| (x / sum)).collect();
-    normalised
+    // all values equal
+    if max == min {
+        return vec![1.0; v.len()]; // All values equal → flat at 1.0
+    }
+
+    let scale = (f - 1.0) / (max - min);
+
+    v.iter()
+        .map(|&x| 1.0 + (x - min) * scale)
+        .collect()
 }
 
 fn average(numbers: &[f64]) -> f64 {
@@ -351,20 +362,21 @@ impl Population {
         }
 
         // normalise pairwise dists to minimum value
-        // let norm_avg_pairwise_dists = normalize_avg_dists(&avg_pairwise_dists);
+        let norm_avg_pairwise_dists = rescale_vector(avg_pairwise_dists.clone(), competition_strength);
 
-        // println!("post_genome_size_weights: {:?}", weights);
+        //println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             //let scaled_distance = safe_pow(norm_avg_pairwise_dists[i], 1.0 / competition_strength);
-            let scaled_distance = weights[i] * avg_pairwise_dists[i];
+            let scaled_distance = weights[i] * norm_avg_pairwise_dists[i];
             weights[i] = scaled_distance;
         }
 
+        // println!("avg_pairwise_dists: {:?}", avg_pairwise_dists);
         // println!("norm_avg_pairwise_dists: {:?}", norm_avg_pairwise_dists);
         // println!("post_pairwise_weights: {:?}", weights);
-        // let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
-        // println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
+        //let mean_avg_pairwise_dists = average(&avg_pairwise_dists);
+        //println!("mean_avg_pairwise_dists: {:?}", mean_avg_pairwise_dists);
 
         // determine whether weights is only 0s
         let max_final_weights = weights.iter().cloned().fold(-1./0. /* -inf */, f64::max);
