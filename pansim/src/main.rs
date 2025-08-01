@@ -68,11 +68,6 @@ fn main() -> io::Result<()> {
         .help("HGT rate, as number of accessory sites transferred per core genome mutation.")
         .required(false)
         .default_value("0.05"))
-    .arg(Arg::new("competition")
-        .long("competition")
-        .help("Adds competition based on average pairwise genome distance.")
-        .required(false)
-        .takes_value(false))
     .arg(Arg::new("rate_genes1")
         .long("rate_genes1")
         .help("Average number of accessory pangenome that mutates per generation in gene compartment 1. Must be >= 0.0")
@@ -151,10 +146,9 @@ fn main() -> io::Result<()> {
         .default_value("0.99"))
     .arg(Arg::new("competition_strength")
         .long("competition_strength")
-        .help("Strength of competition felt by strain to all others. Default = 1.0")
+        .help("Strength of competition felt by strain to all others. Default = 0.0 (no competition)")
         .required(false)
-        .default_value("-1.0"))
-        .allow_hyphen_values(true)
+        .default_value("0.0"))
     .get_matches();
 
     // Set the argument to a variable
@@ -177,7 +171,6 @@ fn main() -> io::Result<()> {
     let neg_lambda: f64 = matches.value_of_t("neg_lambda").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
-    let competition = matches.is_present("competition");
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
     let print_matrices: bool = matches.is_present("print_matrices");
@@ -433,7 +426,7 @@ fn main() -> io::Result<()> {
         let mut avg_pairwise_dists = vec![1.0; pop_size];
 
         // include competition
-        if competition == true {
+        if competition_strength > 0.0 {
             avg_pairwise_dists = pan_genome.average_distance();
         }
 

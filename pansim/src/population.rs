@@ -381,10 +381,10 @@ impl Population {
         let sum_weights: f64 = scaled_distance_weights.iter().sum();
         scaled_distance_weights = scaled_distance_weights.iter().map(|&w| if w != std::f64::NEG_INFINITY {w / sum_weights} else {0.0}).collect();
         
-        //println!("post-scaled_distance_weights: {:?}", scaled_distance_weights);
+        // println!("post-scaled_distance_weights: {:?}", scaled_distance_weights);
         
-        //println!("scaled_distance_weights: {:?}", scaled_distance_weights);
-        //println!("post_genome_size_weights: {:?}", weights);
+        // println!("scaled_distance_weights: {:?}", scaled_distance_weights);
+        // println!("post_genome_size_weights: {:?}", weights);
         // update weights with average pairwise distance
         for i in 0..weights.len() {
             //let scaled_distance = safe_pow(norm_avg_pairwise_dists[i], 1.0 / competition_strength);
