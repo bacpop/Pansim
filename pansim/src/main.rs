@@ -152,14 +152,19 @@ fn main() -> io::Result<()> {
     .get_matches();
 
     // Set the argument to a variable
-    let pop_size: usize = matches.value_of_t("pop_size").unwrap();
-    let core_size: usize = matches.value_of_t("core_size").unwrap();
-    let pan_genes: usize = matches.value_of_t("pan_genes").unwrap();
-    let core_genes: usize = matches.value_of_t("core_genes").unwrap();
+    let mut raw_f64: f64 = matches.value_of_t::<f64>("pop_size").unwrap();
+    let pop_size: usize = raw_f64.round() as usize;
+    raw_f64 = matches.value_of_t::<f64>("core_size").unwrap();
+    let core_size: usize = raw_f64.round() as usize;
+    raw_f64 = matches.value_of_t::<f64>("pan_genes").unwrap();
+    let pan_genes: usize = raw_f64.round() as usize;
+    raw_f64 = matches.value_of_t::<f64>("core_genes").unwrap();
+    let core_genes: usize = raw_f64.round() as usize;
     let mut avg_gene_freq: f64 = matches.value_of_t("avg_gene_freq").unwrap();
     let HR_rate: f64 = matches.value_of_t("HR_rate").unwrap();
     let HGT_rate: f64 = matches.value_of_t("HGT_rate").unwrap();
-    let n_gen: i32 = matches.value_of_t("n_gen").unwrap();
+    raw_f64 = matches.value_of_t::<f64>("n_gen").unwrap();
+    let n_gen: i32 = raw_f64.round() as i32;
     let outpref = matches.value_of("outpref").unwrap_or("distances");
     let max_distances: usize = matches.value_of_t("max_distances").unwrap();
     let core_mu: f64 = matches.value_of_t("core_mu").unwrap();
@@ -171,6 +176,7 @@ fn main() -> io::Result<()> {
     let neg_lambda: f64 = matches.value_of_t("neg_lambda").unwrap();
     let mut n_threads: usize = matches.value_of_t("threads").unwrap();
     let verbose = matches.is_present("verbose");
+    raw_f64 = matches.value_of_t::<f64>("seed").unwrap();
     let seed: u64 = matches.value_of_t("seed").unwrap();
     let print_dist: bool = matches.is_present("print_dist");
     let print_matrices: bool = matches.is_present("print_matrices");
