@@ -55,7 +55,7 @@ fn main() -> io::Result<()> {
         .default_value("100000"))
     .arg(Arg::new("core_mu")
         .long("core_mu")
-        .help("Maximum average pairwise core distance to achieve by end of simulation.")
+        .help("Average core SNP mutation rate per generation per site in core genome. Must be > 0.0.")
         .required(false)
         .default_value("0.05"))
     .arg(Arg::new("HR_rate")
@@ -70,12 +70,12 @@ fn main() -> io::Result<()> {
         .default_value("0.05"))
     .arg(Arg::new("rate_genes1")
         .long("rate_genes1")
-        .help("Average number of accessory pangenome that mutates per generation in gene compartment 1. Must be >= 0.0")
+        .help("Average number of accessory pangenome that mutates per generation per site in gene compartment 1. Must be >= 0.0")
         .required(false)
         .default_value("1.0"))
     .arg(Arg::new("rate_genes2")
         .long("rate_genes2")
-        .help("Average number of accessory pangenome that mutates per generation in gene compartment 2. Must be >= 0.0")
+        .help("Average number of accessory pangenome that mutates per generation per site in gene compartment 2. Must be >= 0.0")
         .required(false)
         .default_value("1000.0"))
     .arg(Arg::new("prop_genes2")
@@ -271,9 +271,9 @@ fn main() -> io::Result<()> {
     }
     let avg_gene_num: i32 = (avg_gene_freq * pan_size as f64).round() as i32;
 
-    // calculate number of mutations per genome per generation, should this be whole pangenome or just accessory genes?
+    // calculate number of core SNPs per genome per generation
     let n_core_mutations =
-        vec![(((core_size as f64 * core_mu) / n_gen as f64) / 2.0).ceil() as f64];
+        vec![(core_size as f64 * core_mu).ceil() as f64];
 
     // calculate average recombinations per genome
     let n_recombinations_core: Vec<f64> = vec![(n_core_mutations[0] as f64 * HR_rate).round()];
@@ -332,6 +332,7 @@ fn main() -> io::Result<()> {
 
     // calculate sites for fast accessory genome
     let num_gene1_sites = (pan_size as f64 * (1.0 - prop_genes2)).round() as usize;
+    let num_gene2_sites: usize = pan_size - num_gene1_sites;
     let prop_gene1_sites: f64 = num_gene1_sites as f64 / pan_size as f64;
     let prop_gene2_sites: f64 = 1.0 - prop_gene1_sites;
 
@@ -343,7 +344,8 @@ fn main() -> io::Result<()> {
             pan_weights_1[i] = 1.0;
         }
         pan_weights.push(pan_weights_1);
-        n_pan_mutations.push(rate_genes1);
+        // get number of mutations per compartment 1 as rate is per site per individual per generation
+        n_pan_mutations.push(rate_genes1 * num_gene1_sites as f64);
         let n_recombinations_pan_gene1 =
             n_recombinations_pan_total * prop_gene1_sites; //(rate_genes1 / (rate_genes1 + rate_genes2));
         n_recombinations_pan.push(n_recombinations_pan_gene1);
@@ -355,7 +357,8 @@ fn main() -> io::Result<()> {
         for i in num_gene1_sites..pan_size {
             pan_weights_2[i] = 1.0;
         }
-        n_pan_mutations.push(rate_genes2);
+        // get number of mutations per compartment 2 as rate is per site per individual per generation
+        n_pan_mutations.push(rate_genes2 * num_gene2_sites as f64);
         pan_weights.push(pan_weights_2);
 
         let n_recombinations_pan_gene2 =
