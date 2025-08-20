@@ -2,7 +2,7 @@ library(ggplot2)
 library(patchwork)
 
 #plot hypercube parameter correlations
-filename <- "pansim_hypercube_sampling_results.tsv"
+filename <- ""
 df <- read.csv(filename, sep = "\t", header = TRUE)
 
 #params <- c("b0", "b1", "b2", "b0_err", "b1_err", "b2_err", "mean_acc")
@@ -30,7 +30,7 @@ for (i in seq_along(pairs))
 }
 
 # Combine and display all plots in a grid
-#p.all <- wrap_plots(plotlist = plot_list)
+p.all <- wrap_plots(plotlist = plot_list)
 
-#ggsave("hypercube_parameter_correlation.png", plot=p.all, width=8, height=6)
+ggsave("hypercube_parameter_correlation.png", plot=p.all, width=8, height=6)
 
