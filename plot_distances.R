@@ -2,8 +2,8 @@ library(ggplot2)
 
 #plot pairwise distances
 #filename <- "pan_mu_0.05_core_mu_0.019_prop_0.1_recomb_0.0_competition_true"
-in_dir <- "gridsearch/commit_64f50f8/files/"
-out_dir <- "gridsearch/commit_64f50f8/figures/"
+in_dir <- ""
+out_dir <- ""
 filenames <- list.files(path = in_dir, pattern = "\\.tsv$")
 
 
@@ -23,11 +23,11 @@ for (filename in filenames)
   p
   
   prefix <- sub(pattern = "(.*)\\..*$", replacement = "\\1", filename)
-  ggsave(paste(out_dir, "ngen100_npop1000_", prefix, ".png", sep = ""))
+  ggsave(paste(out_dir, prefix, ".png", sep = ""))
 }
 
 # plot change in average pairwise distance
-df <- read.csv("pansim/default_same_start_ngen_500_popsize_2000_per_gen.tsv", sep = "\t", header = FALSE)
+df <- read.csv("", sep = "\t", header = FALSE)
 colnames(df) <- c("Avg_Core", "Std_Core", "Avg_Accessory", "Std_Accessory")
 df$ID <- seq.int(nrow(df))
 df$min_Core <- df$Avg_Core - df$Std_Core
@@ -56,8 +56,8 @@ p.core.std <- ggplot(df) + geom_line(aes(x=ID, y=Std_Core), colour="#0c589c", li
   theme_light()
 p.core.std
 
-ggsave("core_distance_per_gen_same_start_ngen500_popsize_2000_1_approx_avgfreq.png", plot=p.core, width=8, height=6)
-ggsave("accessory_distance_per_gen_same_start_ngen500_popsize_2000_1_approx_avgfreq.png", plot=p.acc, width=8, height=6)
-ggsave("core_distance_stddev_per_gen_same_start_ngen500_popsize_2000_1_approx_avgfreq.png", plot=p.core.std, width=8, height=6)
-ggsave("accessory_distance_stddev_per_gen_same_ngen500_popsize_2000_1_approx_avgfreq.png", plot=p.acc.std, width=8, height=6)
+ggsave("core_distance_per_gen.png", plot=p.core, width=8, height=6)
+ggsave("accessory_distance_per_gen.png", plot=p.acc, width=8, height=6)
+ggsave("core_distance_stddev_per_gen.png", plot=p.core.std, width=8, height=6)
+ggsave("accessory_distance_stddev_per_gen.png", plot=p.acc.std, width=8, height=6)
 

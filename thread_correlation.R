@@ -2,7 +2,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 
-df_raw <- read.csv("threading_test.txt", sep = "\t", header = FALSE)
+df_raw <- read.csv("", sep = "\t", header = FALSE)
 
 # Step 1: Split by group and assign iteration per group
 df_split <- df_raw %>%
