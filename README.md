@@ -3,13 +3,11 @@ A fast multi-threaded pangenome dynamics simulator written in Rust.
 
 Pansim is a Wright-Fisher simulator, incorporating gene gain/loss, recombination and selection.
 
-Pansim generates pairwise core vs. accessory distances, like [PopPUNK](https://github.com/bacpop/PopPUNK).
-
-Pansim also generates core genome alignments and gene presence/absence matrices.
+Pansim generates pairwise core vs. accessory distances, like [PopPUNK](https://github.com/bacpop/PopPUNK), core genome alignments and gene presence/absence matrices.
 
 ## Installation
 
-First install rust (>=1.89.0). This can be done using [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html)
+First install rust (>=1.89.0). This can be done using [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html):
 
 ```
 micromamba install conda-forge::rust
@@ -31,7 +29,7 @@ To make this permanent, add the above line to your `~/.bashrc` or `~/.zshrc` fil
 
 ## Running Pansim
 
-Pansim can be run by calling the executable in `Pansim/pansim/target/release/pansim`. If added to your path, simply run
+Pansim can be run by calling the executable in `Pansim/pansim/target/release/pansim`. If added to your path, simply run:
 
 ```
 pansim --outpref test_run
@@ -139,3 +137,22 @@ OPTIONS:
         --verbose
             Prints per generation information.
 ```
+
+## Output
+
+
+### Core vs. accessory distances
+
+By default, Pansim generates core and accessory pairwise distance, named `<outpref>.tsv`, like [PopPUNK](https://github.com/bacpop/PopPUNK). The core and accessory distances per comparison are the first and second column respectively.
+
+### Selection coefficients
+
+Specifying `--print_selection` generates `<outpref>_selection.tsv`, which is a distribution of selection coefficients for all genes in the simulation.
+
+### Core genome alignment and gene presenence/absence matrix
+
+Specifying `--print_matrices` generates `<outpref>_core_genome.csv` and `<outpref>_pangenome.csv`, which are the core genome alignment and gene presence/absence matrix respectively. Each row is a single individual, each column is a site in the core genome/ gene in the pangenome.
+
+### Per generation genome distances
+
+Specifying `--print_dist` generates `<outpref>_per_gen.tsv`, which decribes the changes in core and accessory genome pairwise distances across the simulation time. Each row is a single generation. The columns denote (moving left to right): average core distance, core distance standard deviation, average accessory distance and accessory distance standard deviation.
