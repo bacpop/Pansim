@@ -15,7 +15,7 @@ use std::io::{self, Write};
 fn main() -> io::Result<()> {
     // Define the command-line arguments using clap
     let matches = Command::new("pansim")
-    .version("0.0.2")
+    .version("0.1.0")
     .author("Samuel Horsfield shorsfield@ebi.ac.uk")
     .about("Runs Wright-Fisher simulation, simulating neutral core genome evolution and two-speed accessory genome evolution.")
     .arg(Arg::new("pop_size")
