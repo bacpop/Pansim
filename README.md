@@ -145,9 +145,9 @@ OPTIONS:
 
 By default, Pansim generates core and accessory pairwise distance, named `<outpref>.tsv`, like [PopPUNK](https://github.com/bacpop/PopPUNK). The core and accessory distances per comparison are the first and second column respectively.
 
-### Gene counts
+### Gene frequencies
 
-By default, Pansim generates a gene count file, named `<outpref>_counts.txt`, where each line designates a gene in the pangenome and the number of individuals it is found in.
+By default, Pansim generates a gene frequencies file, named `<outpref>_freqs.txt`, where each line designates a gene in the pangenome and the proportions of total individuals it is found in.
 
 ### Selection coefficients
 

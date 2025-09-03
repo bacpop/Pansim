@@ -837,27 +837,29 @@ impl Population {
     }
 
     // get frequencies of genes
-    pub fn gene_frequencies(&mut self) -> Vec<usize>
+    pub fn gene_frequencies(&mut self) -> Vec<f64>
     {
         let n_genes = self.pop.ncols();
+        let n_individuals: f64 = self.pop.nrows() as f64;
         let range = 0..n_genes;
         
         // add all accessory genes
-        let mut gene_counts: Vec<usize> = range
+        let mut gene_freqs: Vec<f64> = range
             .into_par_iter()
             .map(|current_index| {
                 let col = self.pop.index_axis(Axis(1), current_index);
                 let sum: usize = col.iter().map(|&x| x as usize).sum();
-                sum
+                let freq = sum as f64 / n_individuals;
+                freq
             })
             .collect();
         
         // add all core genes
         for _ in 0..self.core_genes {
-            gene_counts.push(self.pop.nrows() as usize);
+            gene_freqs.push(1.0_f64);
         }
         
-        gene_counts
+        gene_freqs
     }
 
     pub fn write(&mut self, outpref: &str) -> io::Result<()>

@@ -485,7 +485,7 @@ fn main() -> io::Result<()> {
             // write gene frequencies
             {
                 let mut output_file = outpref.to_owned();
-                let extension: &str = "_counts.txt";
+                let extension: &str = "_freqs.txt";
                 output_file.push_str(extension);
                 let mut file = File::create(output_file)?;
 
