@@ -836,6 +836,30 @@ impl Population {
         distances
     }
 
+    // get frequencies of genes
+    pub fn gene_frequencies(&mut self) -> Vec<usize>
+    {
+        let n_genes = self.pop.ncols();
+        let range = 0..n_genes;
+        
+        // add all accessory genes
+        let mut gene_counts: Vec<usize> = range
+            .into_par_iter()
+            .map(|current_index| {
+                let col = self.pop.index_axis(Axis(1), current_index);
+                let sum: usize = col.iter().map(|&x| x as usize).sum();
+                sum
+            })
+            .collect();
+        
+        // add all core genes
+        for _ in 0..self.core_genes {
+            gene_counts.push(self.pop.nrows() as usize);
+        }
+        
+        gene_counts
+    }
+
     pub fn write(&mut self, outpref: &str) -> io::Result<()>
     {
         // core genome

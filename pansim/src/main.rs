@@ -465,19 +465,36 @@ fn main() -> io::Result<()> {
         
         // if at final generation, sample
         if j == n_gen -1 {
+            // write distances
+            {
+                // else calculate hamming and jaccard distances
+                let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
+                let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
+                
+                let mut output_file = outpref.to_owned();
+                let extension: &str = ".tsv";
+                output_file.push_str(extension);
+                let mut file = File::create(output_file)?;
+    
+                // Iterate through the vectors and write each pair to the file
+                for (core, acc) in core_distances.iter().zip(acc_distances.iter()) {
+                    writeln!(file, "{}\t{}", core, acc);
+                }
+            }
 
-            // else calculate hamming and jaccard distances
-            let core_distances = core_genome.pairwise_distances(max_distances, &range1, &range2);
-            let acc_distances = pan_genome.pairwise_distances(max_distances, &range1, &range2);
+            // write gene frequencies
+            {
+                let mut output_file = outpref.to_owned();
+                let extension: &str = "_counts.txt";
+                output_file.push_str(extension);
+                let mut file = File::create(output_file)?;
 
-            let mut output_file = outpref.to_owned();
-            let extension: &str = ".tsv";
-            output_file.push_str(extension);
-            let mut file = File::create(output_file)?;
-
-            // Iterate through the vectors and write each pair to the file
-            for (core, acc) in core_distances.iter().zip(acc_distances.iter()) {
-                writeln!(file, "{}\t{}", core, acc);
+                let gene_counts = pan_genome.gene_frequencies();
+    
+                // Iterate through the vectors and write each pair to the file
+                for count in gene_counts.iter() {
+                    writeln!(file, "{}", count);
+                }
             }
         }
 
